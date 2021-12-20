@@ -7,8 +7,8 @@ import nibabel as nib
 import nrrd
 import random
 
-from deepmri import user_model
-from deepmri.utils import *
+form user_model import UserModel
+from utils import *
 
 class AEDataset3(Dataset):
     
@@ -23,6 +23,7 @@ class AEDataset3(Dataset):
         self.to_gpu      = to_gpu
         self.paper_init  = paper_init
         self.smooth_label = smooth_label
+    
         
         try:
             data_in = torch.load(cfg["data_dir"] + "data_in.pt")
@@ -46,11 +47,13 @@ class AEDataset3(Dataset):
             self.label = self.tract_masks[:5]
         elif set == 3:
             self.label = self.tract_masks[5:]
-    
-        # shape [5, 145, 145, 145]    [classes, B, H, W]
+            
+        self.user = UserModel(self.label)
+            
+        # [classes, B, H, W]
         self.annotations = None
 
-        # shape [145, 1, 145, 145]    [B, classes, H, W]
+        # [B, 1, H, W]
         self.weight = None
 
         self.pos_weight = (5*self.brain_mask.sum() - \
@@ -81,13 +84,13 @@ class AEDataset3(Dataset):
         
         
     def initial_annotation(self) -> Tensor:
-        return user_model.initial_annotation(self.label.detach().cpu(),
+        return self.user.initial_annotation(self.label.detach().cpu(),
                                              self.cfg["init_voxels"],
                                              self.paper_init)
 
 
     def refinement_annotation(self, prediction) -> Tensor:
-        return user_model.refinement_annotation(prediction,
+        return self.user.refinement_annotation(prediction,
                                                 self.label.detach().cpu(),
                                                 self.annotations.detach().cpu(),
                                                 self.cfg["refinement_voxels"])
