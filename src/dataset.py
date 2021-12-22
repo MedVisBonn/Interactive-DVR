@@ -7,10 +7,10 @@ import nibabel as nib
 import nrrd
 import random
 
-form user_model import UserModel
+from user_model import UserModel
 from utils import *
 
-class AEDataset3(Dataset):
+class AEDataset(Dataset):
     
     def __init__(self, cfg, modality='reconstruction', mode='train', set=1,
                  augment=False, to_gpu=True, paper_init=False, smooth_label=False):
@@ -38,14 +38,19 @@ class AEDataset3(Dataset):
         self.brain_mask = torch.tensor(
             nib.load(cfg["active_mask_path"]).get_fdata(), dtype=torch.bool).permute(1,0,2)[14:159]
 
-        # shape [5, 145, 145, 145]    [classes, B, H, W]
-        
+        # shape [12, 145, 145, 145]    [classes, B, H, W]
         self.tract_masks = torch.load(cfg['data_dir'] + 'tract_masks/complete.pt')
         if set == 1:
-            self.label = torch.cat([self.tract_masks[2:3], self.brain_mask.unsqueeze(0).float() - self.tract_masks[2:3]], dim=0).bool()
+            cfg['labels'] = ["Other", "CST"]
+            self.label = torch.cat([self.brain_mask.unsqueeze(0).float() - \
+                                    self.tract_masks[2:3], self.tract_masks[2:3]], \
+                                   dim=0).bool()
         elif set == 2:
+            cfg['labels'] = ["Other", "CG", "CST", "FX", "CC"]
             self.label = self.tract_masks[:5]
         elif set == 3:
+            cfg['labels'] = ["Other", "IFO_left", "IFO_right", "ILF_left", \
+                             "ILF_right", "SLF_left", "SLF_right"]
             self.label = self.tract_masks[5:]
             
         self.user = UserModel(self.label)
@@ -134,7 +139,7 @@ class AEDataset3(Dataset):
         self.transform      = transforms.Lambda(random_apply_lambda)
         
         
-    def __getitem__(self, index) -> dict[str, Tensor]:
+    def __getitem__(self, index) -> dict:
         
         input_ = self.input[index]
         if self.augment:
