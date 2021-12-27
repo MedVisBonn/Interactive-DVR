@@ -5,7 +5,7 @@ from layer import *
 class DualBranchAE(nn.Module):
     def __init__(self, encoder, decoder, in_size, n_classes=None, thresholds='learned'):
         super().__init__()
-
+        
         if encoder == 'dual':
             self.encoder = DualLinkEncoder(in_size)
 

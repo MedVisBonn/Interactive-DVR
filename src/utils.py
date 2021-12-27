@@ -3,7 +3,7 @@
 """
 Created on Tue Nov  3 15:02:19 2020
 
-@author: lennartz
+@author: Jonathan Lennartz
 """
 import numpy as np
 import torch
@@ -89,7 +89,7 @@ def load_model(model: nn.Module, p: str, same=True) -> nn.Module:
 
 def make_path(obj: object, it: str, kind: str, modality='reconstruction') -> str:
     
-    p = '/'.join(['experiments', str(date.today()), modality, kind]) + '/'
+    p = '/'.join(['../experiments', str(date.today()), modality, kind]) + '/'
  
     if not path.exists(p):
         makedirs(p)
@@ -251,6 +251,7 @@ class FeatureExtractor(nn.Module):
         for layer_id in layers:
             layer = dict([*self.model.named_modules()])[layer_id]
             layer.register_forward_hook(self.save_outputs_hook(layer_id))
+            
 
     def save_outputs_hook(self, layer_id: str) -> Callable:
         def fn(_, __, output):
@@ -260,6 +261,12 @@ class FeatureExtractor(nn.Module):
                 self._features[layer_id] = torch.cat([self._features[layer_id], output.cpu()], dim=0)
                 
         return fn
+    
+    
+    def forward_batch(self, in_):
+        output = self.model(in_)
+        return output, self._features
+        
 
     def forward(self, dataset: Dataset) -> Dict[str, Tensor]:
         dataloader = DataLoader(dataset, batch_size=8, shuffle=False)
@@ -272,6 +279,31 @@ class FeatureExtractor(nn.Module):
                 _ = self.model(in_)
                 
         return self._features
+    
+
+class FeatureRegularizer(nn.Module):
+
+    def __init__(self, mode='entropy', alpha=1e-5):
+        super().__init__()
+        self.mode = mode
+        self.alpha = alpha
+
+    def forward(self, feature, mask):
+
+        f = feature.permute(1,2,0).view(-1, 44)[mask.view(-1) == 1]
+        if f.numel():
+            f = (f + 1.) / 2.
+            f = F.normalize(f, p=1)
+
+            if self.mode == 'entropy':
+                #avg_f = f.mean(0)
+                return self.alpha * (- f * torch.log(f + 1e-4)).mean(1).mean()
+
+            elif self.mode == 'hoyer':
+                return (torch.norm(f, dim=0, p=1) / torch.norm(f, dim=0, p=2)).mean()
+
+        else:
+            return 0.
 
 
 
@@ -315,9 +347,9 @@ def evaluate_RF(dataset: Dataset, features: Tensor, cfg: Dict[str, str]) -> Unio
                 ###############################
                 ####### Save Prediction #######
                 ###############################
-
-    prediction = torch.zeros((145,145,145, 5))
-    prediction.view(-1, 5)[test_mask.reshape(-1)  == 1] = Y_predicted_label.float()
+    n_classes = len(cfg['labels'])
+    prediction = torch.zeros((145,145,145, n_classes))
+    prediction.view(-1, n_classes)[test_mask.reshape(-1)  == 1] = Y_predicted_label.float()
 
                 ###############################
                 ##### Evaluate Prediction #####

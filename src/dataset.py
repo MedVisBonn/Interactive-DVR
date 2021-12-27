@@ -89,14 +89,14 @@ class AEDataset(Dataset):
         
         
     def initial_annotation(self) -> Tensor:
-        return self.user.initial_annotation(self.label.detach().cpu(),
+        return self.user.initial_annotation(#self.label.detach().cpu(),
                                              self.cfg["init_voxels"],
                                              self.paper_init)
 
 
     def refinement_annotation(self, prediction) -> Tensor:
         return self.user.refinement_annotation(prediction,
-                                                self.label.detach().cpu(),
+                                                #self.label.detach().cpu(),
                                                 self.annotations.detach().cpu(),
                                                 self.cfg["refinement_voxels"])
 
@@ -147,14 +147,15 @@ class AEDataset(Dataset):
         
         if self.modality == 'reconstruction':
             target = self.input[index].detach().clone()
+            weight = 1.
             
         elif self.modality == 'segmentation':
             if self.mode == 'train':
                 target = self.annotations[:, index]
             elif self.mode == 'validate':
-                target = self.label[:, index]
-                
-        weight = self.weight[index]
+                target = self.label[:, index]    
+            weight = self.weight[index]
+            
         mask = self.brain_mask[index]
         
         return {'input':  input_,
