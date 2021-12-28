@@ -66,9 +66,9 @@ class SelfSupervisionTrainer(object):
                 mse /= (len_ / bs)
                 if epoch % cfg['eval_freq'] == 0:
                     scores, _ = self.evaluate(model, trainloader.dataset, cfg)
+                    wandb.log({'RF_scores': scores}, commit=False)
                 
-                wandb.log({'MSE': mse,
-                           'RF_scores': scores})
+                wandb.log({'MSE': mse})
     
     
     def evaluate(self, model, dataset, cfg):

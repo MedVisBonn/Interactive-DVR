@@ -280,7 +280,7 @@ class ReconstructionDecoder(nn.Module):
     
 
 class SegmentationDecoder(nn.Module):
-    def __init__(self, num_classes, thresholds='learned', norm='default'):
+    def __init__(self, n_classes, thresholds='learned', norm='default'):
         super().__init__()
         
         if norm == 'default':
@@ -293,21 +293,21 @@ class SegmentationDecoder(nn.Module):
         
         if thresholds == 'learned':
             self.threshold = nn.Sequential(
-                nn.Conv2d(44, 44*num_classes, 1, groups=44, bias=True),
+                nn.Conv2d(44, 44*n_classes, 1, groups=44, bias=True),
                 nn.Sigmoid())
             
         elif thresholds == 'selected':
             self.threshold = nn.Sequential(
-                LinearTransform(44, 44*num_classes, 
+                LinearTransform(44, 44*n_classes, 
                                 [-0.9674, -0.4307, 0.0, 0.4307, 0.9674], 10.), 
                 nn.Sigmoid())
             
         elif thresholds == 'random':
             self.threshold = nn.Sequential(
-                RandomWarp(44, 44*num_classes), 
+                RandomWarp(44, 44*n_classes), 
                 nn.Sigmoid())           
             
-        self.aggregate = nn.Conv2d(44*num_classes, num_classes, 
+        self.aggregate = nn.Conv2d(44*n_classes, n_classes, 
                                    1, stride=1, padding=0, bias=False)
 
         
@@ -315,4 +315,4 @@ class SegmentationDecoder(nn.Module):
         x_norm      = self.norm(x)
         x_thresholded = self.threshold(x_norm)
         x_aggregated  = self.aggregate(x_thresholded)
-        return x_aggregated , x_thresholded
+        return x_aggregated #,thresholded

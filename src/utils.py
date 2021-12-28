@@ -214,6 +214,11 @@ class OutPainting(nn.Module):
 ###############################################################################
 
 
+class OutputHook(torch.Tensor):
+    def __call__(self, module, input, output):
+        self.data = output   
+
+
 class FeatureExtractor(nn.Module):
     # https://gist.github.com/fkodom/27ed045c9051a39102e8bcf4ce31df76#file-feature_extractor_hook-py
     def __init__(self, model: nn.Module, layers: Iterable[str]):
@@ -236,11 +241,6 @@ class FeatureExtractor(nn.Module):
                 
         return fn
     
-    
-    def forward_batch(self, in_):
-        output = self.model(in_)
-        return output, self._features
-        
 
     def forward(self, dataset: Dataset) -> Dict[str, Tensor]:
         dataloader = DataLoader(dataset, batch_size=8, shuffle=False)
@@ -253,31 +253,6 @@ class FeatureExtractor(nn.Module):
                 _ = self.model(in_)
                 
         return self._features
-    
-
-class FeatureRegularizer(nn.Module):
-
-    def __init__(self, mode='entropy', alpha=1e-5):
-        super().__init__()
-        self.mode = mode
-        self.alpha = alpha
-
-    def forward(self, feature, mask):
-
-        f = feature.permute(1,2,0).view(-1, 44)[mask.view(-1) == 1]
-        if f.numel():
-            f = (f + 1.) / 2.
-            f = F.normalize(f, p=1)
-
-            if self.mode == 'entropy':
-                #avg_f = f.mean(0)
-                return self.alpha * (- f * torch.log(f + 1e-4)).mean(1).mean()
-
-            elif self.mode == 'hoyer':
-                return (torch.norm(f, dim=0, p=1) / torch.norm(f, dim=0, p=2)).mean()
-
-        else:
-            return 0.
 
 
 

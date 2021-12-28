@@ -53,6 +53,9 @@ class AEDataset(Dataset):
                              "ILF_right", "SLF_left", "SLF_right"]
             self.label = self.tract_masks[5:]
             
+        if cfg['log']:
+            wandb.config.update({'labels': cfg['labels']})
+            
         self.user = UserModel(self.label)
             
         # [classes, B, H, W]

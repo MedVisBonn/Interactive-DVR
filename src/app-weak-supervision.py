@@ -10,19 +10,19 @@ from dataset import *
 from model import *
 from utils import *
 from losses import *
-from trainer import SelfSupervisionTrainer
+from trainer import WeakSupervisionTrainer
 
 
 def main():
     # load config
-    with open('self_supervision.config', 'r') as config:
+    with open('weak_supervision.config', 'r') as config:
         cfg = eval(config.read())
     
     # init logging
     if cfg['log']:
         run = wandb.init(reinit=True, config=cfg, name=cfg['name'], project=cfg['project'])
         cfg = run.config
-    
+
     # init dataset and dataloader
     dataset     = AEDataset(cfg, paper_init=True, modality=cfg['decoder'], 
                             set=cfg['set'], augment=cfg['augment'])
@@ -32,23 +32,23 @@ def main():
     dataset.update_annotation(annot)
         
     # init Trainer
-    trainer = SelfSupervisionTrainer()
+    trainer = WeakSupervisionTrainer()
     
     for i in range(3):
         # init Model
         model = DualBranchAE(encoder = cfg['encoder'],
                              decoder = cfg['decoder'],
-                             in_size = 145).to(cfg['rank'])
+                             in_size = 145,
+                             n_classes = len(cfg['labels']),
+                             thresholds = cfg['thresholds']).to(cfg['rank'])
+
+        model.encoder.load_state_dict(torch.load(f'../resources/self-supervision/encoder-{i}.pt'))
 
         if cfg['log']:
             wandb.watch(model)
         
         # train model
         trainer.train(model, trainloader, cfg)
-        
-        # save state dict
-        torch.save(model.state_dict(), f'../resources/self-supervision/state_dict-{i}.pt')
-        
         
 if __name__ == "__main__":
     main()
