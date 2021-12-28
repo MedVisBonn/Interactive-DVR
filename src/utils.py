@@ -214,32 +214,6 @@ class OutPainting(nn.Module):
 ###############################################################################
 
 
-
-def get_features(dataset, model):
-    dataset.set_mode('validate')
-    dataloader = DataLoader(dataset, batch_size=16, shuffle=False)
-    model.eval()
-    #u = torch.nn.Upsample((256, 256), mode='bilinear')
-
-    fs = []
-    with torch.no_grad():
-        for ele in dataloader:
-
-            in_ = ele['input']
-            if next(model.parameters()).device.type == 'cuda':
-                in_ = in_.to(0)
-            #_, f = model(u(in_))
-            _, f = model(in_)
-            #fs.append(torch.nn.functional.interpolate(f, (145, 145), mode='bilinear').detach().cpu())
-            fs.append(f.detach().cpu())
-        features = torch.cat(fs, dim=0)
-
-    dataset.set_mode('train')
-    model.train()
-
-    return features.permute(0,2,3,1).numpy()
-
-
 class FeatureExtractor(nn.Module):
     # https://gist.github.com/fkodom/27ed045c9051a39102e8bcf4ce31df76#file-feature_extractor_hook-py
     def __init__(self, model: nn.Module, layers: Iterable[str]):
@@ -307,13 +281,14 @@ class FeatureRegularizer(nn.Module):
 
 
 
-def evaluate_RF(dataset: Dataset, features: Tensor, cfg: Dict[str, str]) -> Union[Dict[str, float], Tensor]:
+def evaluate_RF(dataset: Dataset, features: Tensor, cfg: Dict[str, str]) \
+                -> Union[Dict[str, float], Tensor]:
 
                 ###############################
                 ##### TRAIN RANDOM FOREST #####
                 ###############################
                 
-    train_mask  = dataset.weight.detach().cpu().squeeze().numpy()#.permute(0,2,3,1).repeat(1,1,1,44).numpy()
+    train_mask  = dataset.weight.detach().cpu().squeeze().numpy()    #.permute(0,2,3,1).repeat(1,1,1,44).numpy()
     test_mask   = dataset.brain_mask.detach().cpu().numpy()#.unsqueeze(3).repeat(1,1,1,44).numpy()
     train_label = dataset.annotations.detach().cpu().permute(1,2,3,0).numpy()
     test_label  = dataset.label.detach().cpu().permute(1,2,3,0).numpy()

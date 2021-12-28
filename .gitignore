@@ -1,6 +1,7 @@
 # Folders
 experiments/*
 src/wandb/*
+resources/*
 
 # Notebooks
 *.ipynb
