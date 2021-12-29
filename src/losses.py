@@ -49,3 +49,29 @@ class ThresholdRegularizer(nn.Module):
     
     def forward(self, x):
         return self.gamma * torch.sum( 0.25 - (x - 0.5) ** 2 )
+    
+    
+class FeatureRegularizer(nn.Module):
+
+    def __init__(self, mode='entropy', alpha=1e-5):
+        super().__init__()
+        self.mode = mode
+        self.alpha = alpha
+
+    def forward(self, feature, mask):
+        f = feature.permute(0,2,3,1).view(-1, 44)[mask.view(-1) == 1]
+        #f = feature
+        if f.numel():
+            f = torch.tanh(f)
+            f = (f + 1.) / 2.
+            f = F.normalize(f, p=1)
+        
+            if self.mode == 'entropy':
+                #avg_f = f.mean(0)
+                return self.alpha * (- f * torch.log(f + 1e-4)).mean(1).mean()
+
+            elif self.mode == 'hoyer':
+                return (torch.norm(f, dim=0, p=1) / torch.norm(f, dim=0, p=2)).mean()
+
+        else:
+            return torch.tensor(0., requires_grad=True)

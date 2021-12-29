@@ -4,8 +4,6 @@ from torch.nn.utils import clip_grad_norm_
 
 import wandb
 from tqdm import tqdm
-import matplotlib.pyplot as plt
-
 
 from dataset import *
 from model import *
@@ -23,21 +21,28 @@ class SelfSupervisionTrainer(object):
         trainloader.dataset.set_mode('train')
         trainloader.dataset.set_modality(cfg['decoder'])
         model.train()
+        feature_hook = OutputHook()
+        feature_hook.requires_grad = True
+        model.encoder.register_forward_hook(feature_hook)
         
         if cfg['log']:
 
             len_ = trainloader.dataset.__len__()
             bs   = trainloader.batch_size
             mse  = 0.
+            reg  = 0.
             
         optimizer   = Adam([{'params': model.encoder.parameters(), 'lr': cfg['lr'][0]},
                             {'params': model.decoder.parameters(), 'lr': cfg['lr'][1]}])
         
         loss_fn = MSELoss()
-
+        regularizer = FeatureRegularizer(alpha=10.)
         
         for epoch in tqdm(range(1, cfg['n_epochs']+1)):
-
+            if cfg['log']:
+                mse = 0.
+                reg = 0.
+                
             if cfg['augment']:
                 trainloader.dataset.update_painting()
 
@@ -51,26 +56,31 @@ class SelfSupervisionTrainer(object):
                 target = batch['target']
                 mask   = batch['mask']
 
-                output = model(input_)
-                loss   = loss_fn(output, target, mask.unsqueeze(1))
+                output, features = model.forward_features(input_)
+                MSE    = loss_fn(output, target, mask.unsqueeze(1))
+                REG    = regularizer(features, mask)
                 
+                loss = MSE + REG           
                 optimizer.zero_grad()
                 loss.backward()
+            
                 clip_grad_norm_(model.parameters(), 2)
                 optimizer.step()
-            
+                
                 if cfg['log']:
-                    mse += loss.cpu().item()
+                    mse += MSE.cpu().item()
+                    reg += REG.cpu().item()
                         
             if cfg['log']:
                 mse /= (len_ / bs)
+                reg /= (len_ / bs)
                 if epoch % cfg['eval_freq'] == 0:
                     scores, _ = self.evaluate(model, trainloader.dataset, cfg)
                     wandb.log({'RF_scores': scores}, commit=False)
-                
-                wandb.log({'MSE': mse})
+                wandb.log({'MSE': mse,
+                           'REG': reg})
     
-    
+    @torch.no_grad()
     def evaluate(self, model, dataset, cfg):
         
         dataset.augment = False

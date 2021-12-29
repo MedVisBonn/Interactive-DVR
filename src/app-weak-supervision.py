@@ -34,7 +34,7 @@ def main():
     # init Trainer
     trainer = WeakSupervisionTrainer()
     
-    for i in range(3):
+    for i in range(1):
         # init Model
         model = DualBranchAE(encoder = cfg['encoder'],
                              decoder = cfg['decoder'],

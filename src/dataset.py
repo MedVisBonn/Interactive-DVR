@@ -154,9 +154,9 @@ class AEDataset(Dataset):
             
         elif self.modality == 'segmentation':
             if self.mode == 'train':
-                target = self.annotations[:, index]
+                target = self.annotations[:, index].detach()
             elif self.mode == 'validate':
-                target = self.label[:, index]    
+                target = self.label[:, index].detach()
             weight = self.weight[index]
             
         mask = self.brain_mask[index]

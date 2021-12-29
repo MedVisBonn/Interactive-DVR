@@ -239,8 +239,8 @@ class FeatureExtractor(nn.Module):
             else:
                 self._features[layer_id] = torch.cat([self._features[layer_id], output.cpu()], dim=0)
                 
-        return fn
-    
+        return fn        
+        
 
     def forward(self, dataset: Dataset) -> Dict[str, Tensor]:
         dataloader = DataLoader(dataset, batch_size=8, shuffle=False)

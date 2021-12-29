@@ -315,4 +315,4 @@ class SegmentationDecoder(nn.Module):
         x_norm      = self.norm(x)
         x_thresholded = self.threshold(x_norm)
         x_aggregated  = self.aggregate(x_thresholded)
-        return x_aggregated #,thresholded
+        return x_aggregated# , x_thresholded
