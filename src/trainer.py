@@ -56,14 +56,13 @@ class SelfSupervisionTrainer(object):
                 target = batch['target']
                 mask   = batch['mask']
 
-                output, features = model.forward_features(input_)
+                output = model.forward(input_)
                 MSE    = loss_fn(output, target, mask.unsqueeze(1))
-                REG    = regularizer(features, mask)
+                REG    = regularizer(feature_hook, mask)
+                loss   = MSE + REG    
                 
-                loss = MSE + REG           
                 optimizer.zero_grad()
                 loss.backward()
-            
                 clip_grad_norm_(model.parameters(), 2)
                 optimizer.step()
                 
