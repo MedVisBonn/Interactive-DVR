@@ -214,9 +214,9 @@ class OutPainting(nn.Module):
 ###############################################################################
 
 
-class OutputHook(torch.Tensor):
+class OutputHook:
     def __call__(self, module, input, output):
-        self = output 
+        self.output = output
 
 
 class FeatureExtractor(nn.Module):
