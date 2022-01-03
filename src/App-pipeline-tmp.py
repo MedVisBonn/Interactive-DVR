@@ -17,7 +17,7 @@ from trainer import *
 
 
 def run(i):
-    with open('experiment.config', 'r') as config:
+    with open('configs/experiment.config', 'r') as config:
         cfg = eval(config.read())
 
     if cfg['log']:
