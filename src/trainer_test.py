@@ -176,12 +176,14 @@ class WeakSupervisionTrainer(Trainer):
             bs   = trainloader.batch_size
             
         optimizer   = Adam([{'params': model.encoder.parameters(), 'lr': lr[0]},
-                            {'params': model.decoder.parameters(), 'lr': lr[1]}])
+                            {'params': model.decoder.parameters(), 'lr': lr[1]},
+                            {'params': model.decoder_recon.parameters(), 'lr': lr[1]}])
         
         #optimizer   = Adam(model.parameters(), lr=lr)
         #scheduler   = lr_scheduler.CosineAnnealingLR(optimizer, epochs, eta_min=lr/10, verbose=True)
 
         loss_fn     = SEGLoss()
+        recon_loss  = MSELoss()
         regularizer = ThresholdRegularizer(gamma=1e-6)
         
         scaler      = trainloader.dataset.annotations.sum().to(cfg['rank'])
@@ -218,10 +220,11 @@ class WeakSupervisionTrainer(Trainer):
                 weight = batch['weight']
                 mask   = batch['mask']
                 
-                output = model(input_)
+                output, recon = model.forward_both(input_)
                 loss   = loss_fn(output, target, weight, 
                                  pos_weight, scaler) \
-                         + regularizer(hook.output)
+                         + regularizer(hook.output) \
+                         + 0.1*recon_loss(recon, input_.detach(), mask.unsqueeze(1))
 
                 optimizer.zero_grad()          
                 loss.backward()

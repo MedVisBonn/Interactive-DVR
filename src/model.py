@@ -20,6 +20,15 @@ class DualBranchAE(nn.Module):
 
         elif decoder == 'segmentation':
             self.decoder = SegmentationDecoder(n_classes=n_classes, thresholds=thresholds)
+            self.decoder_recon = ReconstructionDecoder()
+    
+    
+    def forward_both(self, x):
+        x_encoded = self.encoder(x)
+        x_segment = self.decoder(x_encoded)
+        x_recon   = self.decoder_recon(x_encoded)
+        
+        return x_segment, x_recon
     
     
     def forward_features(self, x):
@@ -27,6 +36,7 @@ class DualBranchAE(nn.Module):
         x_decoded = self.decoder(x_encoded)
         
         return x_decoded, x_encoded
+    
     
     def forward(self, x):
         x_encoded = self.encoder(x)

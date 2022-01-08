@@ -305,10 +305,35 @@ class SegmentationDecoder(nn.Module):
         elif thresholds == 'random':
             self.threshold = nn.Sequential(
                 RandomWarp(44, 44*n_classes), 
-                nn.Sigmoid())           
+                nn.Sigmoid())
             
-        self.aggregate = nn.Conv2d(44*n_classes, n_classes, 
-                                   1, stride=1, padding=0, bias=False)
+        elif thresholds == 'old':
+            self.threshold = nn.Sequential(      
+                nn.Conv2d(44, 22, 1),
+                nn.PReLU(22),
+            )
+            
+        elif thresholds == 'old2':
+            self.threshold = nn.Sequential(
+                nn.Conv2d(44, 22, 5, stride=1, padding=2),
+                nn.PReLU(22),
+                nn.BatchNorm2d(22),
+
+                nn.Conv2d(22, 22, 1),
+                nn.PReLU(22),
+                nn.BatchNorm2d(22),
+            )
+        
+        
+        if thresholds == 'old':
+            self.aggregate =  nn.Conv2d(22, n_classes, 1)
+            
+        elif thresholds == 'old2':
+            self.aggregate =  nn.Conv2d(22, n_classes, 5, stride=1, padding=2) 
+            
+        else:
+            self.aggregate = nn.Conv2d(44*n_classes, n_classes, 
+                                       1, stride=1, padding=0, bias=False)
 
         
     def forward(self, x):
@@ -316,3 +341,4 @@ class SegmentationDecoder(nn.Module):
         x_thresholded = self.threshold(x_norm)
         x_aggregated  = self.aggregate(x_thresholded)
         return x_aggregated# , x_thresholded
+    

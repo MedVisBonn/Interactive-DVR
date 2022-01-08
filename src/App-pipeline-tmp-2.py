@@ -35,9 +35,8 @@ def run(i):
 
     
     model_dir = '../trained-models/reconstruction/'
-    #dict_name = f"{cfg['name']}-{cfg['s_encoder']}-{cfg['augment']*'augment-'}{i}.pt"
+#    dict_name = f"{cfg['name']}-{cfg['s_encoder']}-{cfg['augment']*'augment-'}{i}.pt"
     dict_name = f"App-Test-{cfg['s_encoder']}-{cfg['augment']*'augment-'}{i}.pt"
-    
     dict_path = model_dir + dict_name
 
     db_recon = DualBranchAE(encoder = cfg['s_encoder'],
@@ -46,7 +45,7 @@ def run(i):
     
     trainer_recon = SelfSupervisionTrainer()
 
-    if cfg['s_load']: #os.path.isfile(dict_path) and 
+    if cfg['s_load'] and os.path.isfile(dict_path):
         db_recon.load_state_dict(torch.load(dict_path), strict=True)
         #db_recon.load_state_dict(torch.load(f'../resources/self-supervision/state_dict-{i}.pt'))
 
@@ -63,54 +62,46 @@ def run(i):
     data_path = data_dir + data_name
 
     dataset.clear_annotation()
+    print(dataset.annotations)
 
-    if os.path.isfile(data_path) and cfg['data_load']:
-        annot = torch.load(data_path)
-        dataset.update_annotation(annot)
+    #if os.path.isfile(data_path) and cfg['data_load']:
+    #    annot = torch.load(data_path)
+    #    dataset.update_annotation(annot)
+#
+    #else:
+    #    annot = dataset.initial_annotation()
+    #    dataset.update_annotation(annot)
+#
+    #    for j in range(cfg['num_interactions']):
+    #        scores, predictions = trainer_recon.evaluate(db_recon,
+    #                                                     dataset,
+    #                                                     cfg)
+    #        if cfg['log']:
+    #            wandb.log({'RF_s'  : scores,
+    #                       'x': j})   
+#
+    #        annot = dataset.refinement_annotation(predictions)
+    #        dataset.update_annotation(annot)
+#
+    #    scores, predictions = trainer_recon.evaluate(db_recon,
+    #                                                 dataset,
+    #                                                 cfg)
+    #    if cfg['log']:
+    #        wandb.log({'RF_s'  : scores,
+    #                   'x': cfg['num_interactions']})
+   #
+#
+    #    torch.save(dataset.annotations.cpu().detach(), data_path)    
+#
+#
+    #annot_checkpoint = dataset.annotations.cpu().detach().clone()
+#
+    #print(dataset.annotations.detach().sum())
+    #dataset.clear_annotation()
+    #print(dataset.annotations)
 
-    else:
-        annot = dataset.initial_annotation()
-        dataset.update_annotation(annot)
-
-        for j in range(cfg['num_interactions']):
-            scores, predictions = trainer_recon.evaluate(db_recon,
-                                                         dataset,
-                                                         cfg)
-            if cfg['log']:
-                wandb.log({'RF_s'  : scores,
-                           'x': j})     
-
-            annot = dataset.refinement_annotation(predictions)
-            dataset.update_annotation(annot)
-
-        torch.save(dataset.annotations.cpu().detach(), data_path)    
-
-        scores_checkpoint = scores.copy()
-
-
-    annot_checkpoint = dataset.annotations.cpu().detach().clone()
-
-    for j in range(cfg['num_interactions']):
-        scores, predictions = trainer_recon.evaluate(db_recon,
-                                                     dataset,
-                                                     cfg)
-        if cfg['log']:
-            wandb.log({'RF_s'  : scores,
-                       'x': j+cfg['num_interactions']})
-
-        annot = dataset.refinement_annotation(predictions)
-        dataset.update_annotation(annot)
-
-    scores, predictions = trainer_recon.evaluate(db_recon,
-                                                 dataset,
-                                                 cfg)
-    if cfg['log']:
-        wandb.log({'RF_s'  : scores,
-                   'x': 2*cfg['num_interactions']})
-
-    dataset.clear_annotation()
-    dataset.update_annotation(annot_checkpoint)
-
+    annot = dataset.initial_annotation()
+    dataset.update_annotation(annot)
 
     model_dir = '../trained-models/segmentation/'
     dict_name = f"{cfg['name']}-{cfg['w_encoder']}-{i}.pt"
@@ -123,9 +114,7 @@ def run(i):
                               thresholds = cfg['thresholds']).to(cfg['rank'])
 
     trainer_segment = WeakSupervisionTrainer()
-    trainloader = DataLoader(dataset, batch_size=cfg['w_batch_size'], 
-                             shuffle=True)
-    
+
     if os.path.isfile(dict_path) and cfg['w_load']:
         db_segment.load_state_dict(torch.load(dict_path), strict=True)
 
@@ -133,44 +122,47 @@ def run(i):
         db_segment.encoder.load_state_dict(db_recon.encoder.state_dict())
         dataset.augment  = False
         dataset.modality = 'segmentation'
-
-        trainer_segment.train(db_segment, trainloader, epochs=cfg['w_n_epochs'], 
+        trainloader = DataLoader(dataset, batch_size=cfg['w_batch_size'], 
+                                 shuffle=True)
+        trainer_segment.train(db_segment, trainloader, epochs=cfg['w_n_epochs'][0], 
                               lr=cfg['w_lr'], warm_up=True, cfg=cfg)
-        torch.save(db_segment.state_dict(), dict_path)
+        #torch.save(db_segment.state_dict(), dict_path)
 
 
 
     annot_checkpoint = dataset.annotations.cpu().detach().clone()
 
-    if cfg['log'] and not cfg['data_load']:
-        wandb.log({'RF_w'  : scores_checkpoint,
-                   'x': cfg['num_interactions']-1})
 
     for j in range(cfg['num_interactions']):
         scores, predictions = trainer_segment.evaluate(db_segment,
                                                        dataset,
                                                        cfg)
         
-        #trainer_segment.train(db_segment, trainloader, epochs=9, 
-        #                      lr=0.0001, warm_up=False, cfg=cfg)
-
+        #scores, predictions = trainer_segment.model_dice(db_segment,
+        #                                                 dataset,
+        #                                                 'train')
+        
+        trainer_segment.train(db_segment, trainloader, epochs=cfg['w_n_epochs'][1] * (j+1), 
+                              lr=cfg['w_lr'],  warm_up=False, cfg=cfg)
+        
         if cfg['log']:
             wandb.log({'RF_w'  : scores,
-                       'x': j+cfg['num_interactions']})
+                       'x': j})
 
         annot = dataset.refinement_annotation(predictions)
         dataset.update_annotation(annot)
         
-        trainer_segment.train(db_segment, trainloader, epochs=10, 
-                              lr=0.0001, warm_up=False, cfg=cfg)
+        trainer_segment.train(db_segment, trainloader, epochs=cfg['w_n_epochs'][1] * (j+1), 
+                              lr=cfg['w_lr'],  warm_up=False, cfg=cfg)
 
     scores, predictions = trainer_segment.evaluate(db_segment,
                                                    dataset,
                                                    cfg)
     if cfg['log']:
         wandb.log({'RF_w'  : scores,
-                   'x': 2*cfg['num_interactions']})
-
+                   'x': cfg['num_interactions']})
+        
+    print(dataset.annotations.detach().sum())
     dataset.clear_annotation()
     dataset.update_annotation(annot_checkpoint)
     
