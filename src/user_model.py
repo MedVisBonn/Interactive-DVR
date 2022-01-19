@@ -8,7 +8,7 @@ import random
 
 class UserModel:
     
-    def __init__(self, ground_truth: Tensor, brush_sizes=torch.arange(2,7)):
+    def __init__(self, ground_truth: Tensor, brush_sizes=torch.arange(2,5)):
         super().__init__()
         
         # globals
@@ -301,6 +301,7 @@ class UserModel:
 
                 # samples voxels and add their neighborhood to 2D mask
                 n_class_samples = self._slice_samples_per_class(t_selection, inverse_size_weights, n_samples)
+                print(n_class_samples.sum())
                 #print(t_selection.shape, n_class_samples)
 
                 class_samples   = self._sample_candidate_voxels(t_selection, t_selection, n_class_samples=n_class_samples, seed=1)
@@ -376,6 +377,7 @@ class UserModel:
         diff_selection  = diff[selection]
         t_selection     = self.gt[selection]
         n_class_samples = self._slice_samples_per_class(diff_selection, inverse_size_weights, n_samples)
+        print(n_class_samples.sum())
 
         # 2.2) for each class, sample from false negatives as often as specified in n_class_samples
         class_samples = self._sample_candidate_voxels(diff_selection, t_selection, n_class_samples=n_class_samples, seed=1)

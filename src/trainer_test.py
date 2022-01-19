@@ -17,7 +17,7 @@ class Trainer:
     @torch.no_grad()
     def evaluate(self, model: nn.Module, dataset: Dataset, cfg: Dict[str, object]) \
         -> Union[Dict[str, Tensor], Tensor]:
-        
+    
         augment_checkpoint = dataset.augment
         dataset.augment = False
         layer = 'encoder'
@@ -175,13 +175,13 @@ class WeakSupervisionTrainer(Trainer):
             len_ = trainloader.dataset.__len__()
             bs   = trainloader.batch_size
             
-        optimizer   = Adam([{'params': model.encoder.parameters(), 'lr': lr[0]},
-                            {'params': model.decoder.parameters(), 'lr': lr[1]},
-                            {'params': model.decoder_recon.parameters(), 'lr': lr[1]}])
+        #optimizer   = Adam([{'params': model.encoder.parameters(), 'lr': lr[0]},
+        #                    {'params': model.decoder.parameters(), 'lr': lr[1]},
+        #                    {'params': model.decoder_recon.parameters(), 'lr': lr[1]}])
         
-        #optimizer   = Adam(model.parameters(), lr=lr)
-        #scheduler   = lr_scheduler.CosineAnnealingLR(optimizer, epochs, eta_min=lr/10, verbose=True)
-
+        optimizer   = Adam(model.parameters(), lr=lr)
+        #scheduler   = lr_scheduler.CosineAnnealingLR(optimizer, epochs, eta_min=lr/100, verbose=True)
+        #scheduler = lr_scheduler.MultiplicativeLR(optimizer, lambda epoch: 0.9**epoch, verbose=True)
         loss_fn     = SEGLoss()
         recon_loss  = MSELoss()
         regularizer = ThresholdRegularizer(gamma=1e-6)
@@ -211,7 +211,17 @@ class WeakSupervisionTrainer(Trainer):
             else:
                 for param in model.parameters():
                     param.requires_grad = True
-            
+                    
+                    
+            if (warm_up and epoch == 15) or (not warm_up and epoch == 10):
+                for g in optimizer.param_groups:
+                    g['lr'] = 0.00001
+                    
+                    
+            if (not warm_up and epoch == 30):
+                for g in optimizer.param_groups:
+                    g['lr'] = 0.000001
+                    
             # training loop
             for batch in trainloader:
 
@@ -229,7 +239,9 @@ class WeakSupervisionTrainer(Trainer):
                 optimizer.zero_grad()          
                 loss.backward()
                 optimizer.step()
-            #scheduler.step()
+                
+            #if (not warm_up) or (epoch > 5 and warm_up):
+            #    scheduler.step()
             
             #remove hook at the end of training due to interaction with evaluation hooks
             handle.remove()
