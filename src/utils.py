@@ -297,6 +297,7 @@ def evaluate_RF(dataset: Dataset, features: Tensor, cfg: Dict[str, str]) \
                 ###############################
                 ####### Save Prediction #######
                 ###############################
+                
     n_classes = len(cfg['labels'])
     prediction = torch.zeros((145,145,145, n_classes))
     prediction.view(-1, n_classes)[test_mask.reshape(-1)  == 1] = Y_predicted_label.float()
@@ -326,5 +327,100 @@ def evaluate_RF(dataset: Dataset, features: Tensor, cfg: Dict[str, str]) \
     scores["Avg_prec_tracts"] = precision[1:].mean().numpy()
     scores["Avg_recall_tracts"] = recall[1:].mean().numpy()
     scores["Avg_f1_tracts"] = f1[1:].mean().numpy()
+    
+    
 
     return scores, prediction.permute(3,0,1,2)
+
+
+def evaluate_RF_tmp(dataset: Dataset, features: Tensor, prev_correct: Tensor,
+                    cfg: Dict[str, str]) -> Union[Dict[str, float], Tensor]:
+
+                ###############################
+                ##### TRAIN RANDOM FOREST #####
+                ###############################
+                
+    train_mask  = dataset.weight.detach().cpu().squeeze().numpy()    #.permute(0,2,3,1).repeat(1,1,1,44).numpy()
+    test_mask   = dataset.brain_mask.detach().cpu().numpy()#.unsqueeze(3).repeat(1,1,1,44).numpy()
+    train_label = dataset.annotations.detach().cpu().permute(1,2,3,0).numpy()
+    test_label  = dataset.label.detach().cpu().permute(1,2,3,0).numpy()
+    
+    # Input - Mask voxels that are not labelled before flattening the input
+    X_train = features.reshape((-1, features.shape[-1]))[train_mask.reshape(-1) == 1]
+    X_test  = features.reshape((-1, features.shape[-1]))[test_mask.reshape(-1)  == 1]
+    # Target - Same as above. Mask before flattening
+    Y_train = train_label.reshape((-1, train_label.shape[-1]))[train_mask.reshape(-1) == 1]
+    Y_test  = test_label.reshape((-1,  train_label.shape[-1]))[test_mask.reshape(-1)  == 1]
+
+    # Init Random Forest Classifier
+    clf = RandomForestClassifier(n_estimators=100,
+                         bootstrap=True,
+                         oob_score=True,
+                         random_state=0,
+                         n_jobs=-1,
+                         max_features="auto",
+                         class_weight="balanced",
+                         max_depth=None,
+                         min_samples_leaf=cfg["min_samples_leaf"])
+
+    # Train
+    clf.fit(X_train, Y_train)
+    # predict labels in test mask
+    predicted_prob    = clf.predict_proba(X_test)
+    Y_predicted_prob  = torch.tensor([p[:, 1] for p in predicted_prob]).T
+    Y_predicted_label = (Y_predicted_prob > 0.5)*1
+
+
+                ###############################
+                ####### Save Prediction #######
+                ###############################
+                
+    n_classes = len(cfg['labels'])
+    prediction = torch.zeros((145,145,145, n_classes))
+    prediction.view(-1, n_classes)[test_mask.reshape(-1)  == 1] = Y_predicted_label.float()
+
+                ###############################
+                ##### Evaluate Prediction #####
+                ###############################
+    
+    current_correct = torch.eq(Y_predicted_label, torch.tensor(Y_test)) * 1
+    total_mistakes = torch.ne(Y_predicted_label, torch.tensor(Y_test))
+    false_positives = ((1 - Y_predicted_label) * Y_test)
+    false_negatives = (Y_predicted_label * (1-Y_test))
+    
+    print(current_correct.shape, total_mistakes.shape)
+    if prev_correct is None:
+        bad_mistakes = torch.zeros(5)   
+        bad_positives = torch.zeros(5)   
+        bad_negatives = torch.zeros(5)   
+    else:
+        print("step 3")
+        bad_mistakes  = (total_mistakes  * prev_correct).sum(0) / prev_correct.sum(0)
+        bad_positives = (false_positives * prev_correct).sum(0)
+        bad_negatives = (false_negatives * prev_correct).sum(0)
+
+    
+    # Constant for numerical stability
+    eps = 1e-5
+    # statictics for precision, recall and Dice (f1)
+    TP       = (Y_predicted_label * Y_test).sum(axis=0)
+    TPplusFP = Y_predicted_label.sum(axis=0)
+    TPplusFN = Y_test.sum(axis=0)
+
+    precision = (TP + eps) / (TPplusFP + eps)
+    recall    = (TP + eps) / (TPplusFN + eps)
+    f1        = (2 * precision * recall + eps) / ( precision + recall  + eps)
+
+    labels = cfg["labels"]
+    scores = {}
+    for c in range(len(labels)):
+        scores[f"{labels[c]}_total_mistakes"] = total_mistakes.sum(0)[c].numpy()
+        scores[f"{labels[c]}_bad_mistakes"]   = bad_mistakes[c].numpy()
+        scores[f"{labels[c]}_bad_positives"]  = bad_positives[c].numpy()
+        scores[f"{labels[c]}_bad_negatives"]  = bad_negatives[c].numpy()
+
+    scores["Avg_bad_mistakes"]  = bad_mistakes[1:].float().mean().numpy()
+    scores["Avg_bad_positives"] = bad_positives[1:].float().mean().numpy()
+    scores["Avg_bad_negatives"] = bad_negatives[1:].float().mean().numpy()
+
+    return scores, current_correct

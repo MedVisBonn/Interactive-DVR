@@ -8,7 +8,7 @@ import random
 
 class UserModel:
     
-    def __init__(self, ground_truth: Tensor, brush_sizes=torch.arange(2,5)):
+    def __init__(self, ground_truth: Tensor, brush_sizes=torch.arange(2,7)):
         super().__init__()
         
         # globals

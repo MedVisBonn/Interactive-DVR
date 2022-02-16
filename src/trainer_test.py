@@ -30,6 +30,23 @@ class Trainer:
         
         return scores, rf_prediction
     
+    @torch.no_grad()
+    def evaluate_tmp(self, model: nn.Module, dataset: Dataset, prev_correct: Tensor,
+                     cfg: Dict[str, object]) -> Union[Dict[str, Tensor], Tensor]:
+    
+        augment_checkpoint = dataset.augment
+        dataset.augment = False
+        layer = 'encoder'
+        extractor = FeatureExtractor(model, layers=[layer]) 
+        features  = extractor(dataset)
+        features  = features[layer].permute(0,2,3,1).numpy()
+        print("step 2")
+        scores, current_correct = evaluate_RF_tmp(dataset, features, prev_correct, cfg)
+                
+        dataset.augment = augment_checkpoint
+        
+        return scores, current_correct
+    
     
     @torch.no_grad()
     def model_dice(self, model: nn.Module, dataset: Dataset, mode: str):
@@ -66,8 +83,7 @@ class Trainer:
 
         mask       = ((target.sum(0, keepdim=True) > 0) * 1)
         prediction = torch.cat(predictions, dim=0).permute(1,0,2,3)#.detach()
-
-
+        
         TP = (prediction * target * mask).sum((1,2,3))
         TPplusFP = (prediction*mask).sum((1,2,3))
         TPplusFN = (target*mask).sum((1,2,3))
@@ -188,6 +204,7 @@ class WeakSupervisionTrainer(Trainer):
         
         scaler      = trainloader.dataset.annotations.sum().to(cfg['rank'])
         pos_weight  = trainloader.dataset.pos_weight.to(cfg['rank'])
+        #prev_correct = 0
         
         for epoch in tqdm(range(0, epochs)):
             
@@ -249,7 +266,7 @@ class WeakSupervisionTrainer(Trainer):
             if cfg['log']:
                 model.eval()
                 if epoch % cfg['w_eval_freq'] == 0:
-                    scores, _ = self.evaluate(model, trainloader.dataset, cfg)
+                    scores, _  = self.evaluate(model, trainloader.dataset, cfg)
                     model_train_scores, _ = self.model_dice(model, trainloader.dataset, 'train')
                     model_test_scores, _  = self.model_dice(model, trainloader.dataset, 'validate')
                 wandb.log({'RF-training': scores,
