@@ -2,9 +2,16 @@
 experiments/*
 src/wandb/*
 resources/*
+data/*
+trained_models/*
+src/sandbox/*
 
 # Notebooks
 *.ipynb
+
+# files
+*.pt
+*.np
 
 
 # Byte-compiled / optimized / DLL files
