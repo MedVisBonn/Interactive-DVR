@@ -4,7 +4,12 @@ src/wandb/*
 resources/*
 data/*
 trained_models/*
-src/sandbox/*
+
+src/sandbox/data/
+src/sandbox/exp1
+src/sandbox/models/
+src/sandbox/trainer_logs/
+src/sandbox/wandb/
 
 # Notebooks
 *.ipynb
