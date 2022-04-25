@@ -7,6 +7,7 @@ from math import ceil
 from typing import Dict, Iterable, Callable, Generator, Union
 
 
+
 class LocalModule(nn.Module):
     def __init__(self, in_channels, out_channels, size=None):
         super().__init__()
@@ -25,6 +26,7 @@ class LocalModule(nn.Module):
             x_out_low_res = interpolate(x_out, size=(self.size, self.size),
                                         mode='area')
             return [x_out, x_out_low_res]
+        
         
         
 class RegionalModule(nn.Module):
@@ -47,21 +49,26 @@ class RegionalModule(nn.Module):
             return [x_out, x_out_high_res]  
     
     
+    
 class EncodingLayer(nn.Module):
     def __init__(self, in_channels, out_channels, size_high=None, size_low=None, link=None):
         super().__init__()
         self.link = link
 
         if link == 'double':
-            self.local    = LocalModule(in_channels * 2, out_channels, size_low)
-            self.regional = RegionalModule(in_channels * 2, out_channels, size_high)           
-        
+            self.local    = LocalModule(in_channels, out_channels, size_low)
+            self.local_pre_conv = nn.Conv2d(out_channels, out_channels, 1)
+            self.regional = RegionalModule(in_channels, out_channels, size_high)
+            self.regional_pre_conv = nn.Conv2d(out_channels, out_channels, 1)
+            
         if link == 'single':
-            self.local    = LocalModule(in_channels * 2, out_channels, size_low)
+            self.local    = LocalModule(in_channels, out_channels, size_low)
+            self.regional_pre_conv = nn.Conv2d(out_channels, out_channels, 1)
             self.regional = RegionalModule(in_channels, out_channels, size_high)
         else:
             self.local    = LocalModule(in_channels, out_channels, size_low)
             self.regional = RegionalModule(in_channels, out_channels, size_high)
+
 
     def forward(self, x_local: Tensor, x_regional=None):
         if x_regional == None:
@@ -70,16 +77,17 @@ class EncodingLayer(nn.Module):
         regional = self.regional(x_regional)
         
         if (len(local) + len(regional)) == 4:
-            local_cat = torch.cat([local[0], regional[1]], dim=1)
-            regional_cat = torch.cat([regional[0], local[1]], dim=1)
+            local_cat = local[0] + self.regional_pre_conv(regional[1])
+            regional_cat = regional[0] + self.local_pre_conv(local[1])
             return local_cat, regional_cat     
         
         elif (len(local) + len(regional)) == 3:
-            local_cat = torch.cat([*local, regional[1]], dim=1)
+            local_cat = local[0] + self.regional_pre_conv(regional[1])
             return local_cat, regional[0]
         
         else:
             return *local, *regional
+        
         
         
 class ZeroLinkEncoder(nn.Module):
@@ -109,14 +117,15 @@ class SingleLinkEncoder(nn.Module):
     def __init__(self, size_high):
         super().__init__()
         
-        self.layer0 = EncodingLayer(288, 88, size_high)        
+        self.layer0 = EncodingLayer(288, 88, size_high, link='single')        
         self.layer1 = EncodingLayer(88, 44, size_high, link='single')
         self.layer2 = EncodingLayer(44, 22, size_high, link='single')
         self.layer3 = EncodingLayer(22, 22, size_high, link='single')
         
-        self.local4            = LocalModule(2*22, 22)
+        self.local4            = LocalModule(22, 22)
         self.regional4         = RegionalModule(22, 22, size_high)
-        self.final_local_layer = LocalModule(2*22, 44, size_high)
+        self.regional4_pre_conv = nn.Conv2d(22, 22, 1)
+        self.final_local_layer = LocalModule(22, 44, size_high)
 
     
     def forward(self, x):
@@ -127,10 +136,11 @@ class SingleLinkEncoder(nn.Module):
         
         local                = self.local4(input_local)
         _, regional_high_res = self.regional4(input_regional)
-        input_final_layer    = torch.cat([*local, regional_high_res], dim=1)
+        input_final_layer    = local[0] + self.regional4_pre_conv(regional_high_res)
         feature_maps, _      = self.final_local_layer(input_final_layer)
 
         return feature_maps
+        
         
         
 class DualLinkEncoder(nn.Module):
@@ -139,13 +149,14 @@ class DualLinkEncoder(nn.Module):
         size_low = [ceil(size_high/(2**i)) for i in range(1, 5)]
         
         self.layer0 = EncodingLayer(288, 88, size_high, size_low[0], link='double')
-        self.layer1 = EncodingLayer(2*88, 44, size_high, size_low[1], link='double')
-        self.layer2 = EncodingLayer(2*44, 22, size_high, size_low[2], link='double')
-        self.layer3 = EncodingLayer(2*22, 22, size_high, size_low[3], link='double')
+        self.layer1 = EncodingLayer(88, 44, size_high, size_low[1], link='double')
+        self.layer2 = EncodingLayer(44, 44, size_high, size_low[2], link='double')
+        self.layer3 = EncodingLayer(44, 22, size_high, size_low[3], link='double')
         
-        self.local4            = LocalModule(2*22, 22, size_high)
-        self.regional4         = RegionalModule(2*22, 22, size_high)
-        self.final_local_layer = LocalModule(2*22, 44, size_high)
+        self.local4            = LocalModule(22, 22, size_high)
+        self.regional4         = RegionalModule(22, 22, size_high)
+        self.regional4_pre_conv = nn.Conv2d(22, 22, 1)
+        self.final_local_layer = LocalModule(44, 44, size_high)
         
     def forward(self, x: Tensor) -> Tensor:
         input_local, input_regional = self.layer0(x)
@@ -155,10 +166,10 @@ class DualLinkEncoder(nn.Module):
 
         local, _             = self.local4(input_local)
         _, regional_high_res = self.regional4(input_regional)
-        input_final_layer    = torch.cat([local, regional_high_res], dim=1)
-        feature_maps, _      = self.final_local_layer(input_final_layer)
-
+        feature_maps         = torch.cat([local, self.regional4_pre_conv(regional_high_res)], dim=1)
+    
         return feature_maps
+    
     
     
 class LinearTransform(nn.Module):
@@ -184,6 +195,7 @@ class LinearTransform(nn.Module):
         x_transformed = (x.unsqueeze(2) + self.translation) * self.scaling
         
         return x_transformed.view(B, -1, W, H)
+    
     
     
 class RandomWarp(nn.Module):
@@ -213,6 +225,7 @@ class RandomWarp(nn.Module):
         return x_transformed.view(B, -1, W, H)
     
 
+    
 class MaskedBatchNorm2d(nn.BatchNorm2d):
     '''
     https://github.com/ptrblck/pytorch_misc/blob/master/batch_norm_manual.py
@@ -266,6 +279,7 @@ class MaskedBatchNorm2d(nn.BatchNorm2d):
         return input
 
 
+    
 class ReconstructionDecoder(nn.Module):
     def __init__(self):
         super().__init__()
@@ -279,6 +293,7 @@ class ReconstructionDecoder(nn.Module):
         return self.decoder(x)
     
 
+    
 class SegmentationDecoder(nn.Module):
     def __init__(self, n_classes, thresholds='learned', norm='default'):
         super().__init__()
