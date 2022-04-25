@@ -231,7 +231,7 @@ class UserModel:
         return interaction_mask
 
     
-    def initial_annotation(self, n_samples: int, paper_init='False') -> Tensor:        
+    def initial_annotation(self, n_samples: int, paper_init='False', seed: int = 42) -> Tensor:        
         """ creates the initial annotations. For each direction (saggital, coronal,
             axial), select the slice with the most foreground labels (3 in total).
             (2) For each slice, sample n_samples many seeding points and
@@ -301,10 +301,10 @@ class UserModel:
 
                 # samples voxels and add their neighborhood to 2D mask
                 n_class_samples = self._slice_samples_per_class(t_selection, inverse_size_weights, n_samples)
-                print(n_class_samples.sum())
+                #print(n_class_samples.sum())
                 #print(t_selection.shape, n_class_samples)
 
-                class_samples   = self._sample_candidate_voxels(t_selection, t_selection, n_class_samples=n_class_samples, seed=1)
+                class_samples   = self._sample_candidate_voxels(t_selection, t_selection, n_class_samples=n_class_samples, seed=seed)
                 brushed_mask    = self._slice_add_neighbors(class_samples, t_selection)
                 # make interaction map with same shape as model input
                 interaction_map[selection] = torch.bitwise_or(interaction_map[selection], brushed_mask)
@@ -315,7 +315,7 @@ class UserModel:
     
     
     def refinement_annotation(self, prediction: Tensor, annotation_mask: Tensor, 
-                              n_samples: int) -> Tensor:
+                              n_samples: int, seed: int = 42) -> Tensor:
         """ Finds the slice with the worst prediction across all three axis and 
             annotates parts of it. The annotation happens in multiple steps:
             (1) mask all voxels that are already annotated with annotation_mask
@@ -377,10 +377,10 @@ class UserModel:
         diff_selection  = diff[selection]
         t_selection     = self.gt[selection]
         n_class_samples = self._slice_samples_per_class(diff_selection, inverse_size_weights, n_samples)
-        print(n_class_samples.sum())
+        #print(n_class_samples.sum())
 
         # 2.2) for each class, sample from false negatives as often as specified in n_class_samples
-        class_samples = self._sample_candidate_voxels(diff_selection, t_selection, n_class_samples=n_class_samples, seed=1)
+        class_samples = self._sample_candidate_voxels(diff_selection, t_selection, n_class_samples=n_class_samples, seed=seed)
 
         # 2.3) brush all samples with maximum brush from list of brushes
         brushed_mask = self._slice_add_neighbors(class_samples, t_selection)

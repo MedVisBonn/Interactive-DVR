@@ -17,7 +17,7 @@ class Trainer:
     @torch.no_grad()
     def evaluate(self, model: nn.Module, dataset: Dataset, cfg: Dict[str, object]) \
         -> Union[Dict[str, Tensor], Tensor]:
-        
+    
         augment_checkpoint = dataset.augment
         dataset.augment = False
         layer = 'encoder'
@@ -29,6 +29,23 @@ class Trainer:
         dataset.augment = augment_checkpoint
         
         return scores, rf_prediction
+    
+    @torch.no_grad()
+    def evaluate_tmp(self, model: nn.Module, dataset: Dataset, prev_correct: Tensor,
+                     cfg: Dict[str, object]) -> Union[Dict[str, Tensor], Tensor]:
+    
+        augment_checkpoint = dataset.augment
+        dataset.augment = False
+        layer = 'encoder'
+        extractor = FeatureExtractor(model, layers=[layer]) 
+        features  = extractor(dataset)
+        features  = features[layer].permute(0,2,3,1).numpy()
+        print("step 2")
+        scores, current_correct = evaluate_RF_tmp(dataset, features, prev_correct, cfg)
+                
+        dataset.augment = augment_checkpoint
+        
+        return scores, current_correct
     
     
     @torch.no_grad()
@@ -66,8 +83,7 @@ class Trainer:
 
         mask       = ((target.sum(0, keepdim=True) > 0) * 1)
         prediction = torch.cat(predictions, dim=0).permute(1,0,2,3)#.detach()
-
-
+        
         TP = (prediction * target * mask).sum((1,2,3))
         TPplusFP = (prediction*mask).sum((1,2,3))
         TPplusFN = (target*mask).sum((1,2,3))
@@ -160,8 +176,8 @@ class WeakSupervisionTrainer(Trainer):
     def __init__(self):
         super().__init__()
         
-    def train(self, model: nn.Module, trainloader: DataLoader, epochs: int,
-              lr: list, warm_up: bool, cfg: Dict[str, object]) -> None:
+    def fit(self, model: nn.Module, trainloader: DataLoader, epochs: int,
+            lr: list, warm_up: bool, cfg: Dict[str, object]) -> None:
         
         trainloader.dataset.augment = False
         mode_checkpoint = trainloader.dataset.mode
@@ -175,17 +191,20 @@ class WeakSupervisionTrainer(Trainer):
             len_ = trainloader.dataset.__len__()
             bs   = trainloader.batch_size
             
-        optimizer   = Adam([{'params': model.encoder.parameters(), 'lr': lr[0]},
-                            {'params': model.decoder.parameters(), 'lr': lr[1]}])
+        #optimizer   = Adam([{'params': model.encoder.parameters(), 'lr': lr[0]},
+        #                    {'params': model.decoder.parameters(), 'lr': lr[1]},
+        #                    {'params': model.decoder_recon.parameters(), 'lr': lr[1]}])
         
-        #optimizer   = Adam(model.parameters(), lr=lr)
-        #scheduler   = lr_scheduler.CosineAnnealingLR(optimizer, epochs, eta_min=lr/10, verbose=True)
-
+        optimizer   = Adam(model.parameters(), lr=lr)
+        #scheduler   = lr_scheduler.CosineAnnealingLR(optimizer, epochs, eta_min=lr/100, verbose=True)
+        #scheduler = lr_scheduler.MultiplicativeLR(optimizer, lambda epoch: 0.9**epoch, verbose=True)
         loss_fn     = SEGLoss()
+        recon_loss  = MSELoss()
         regularizer = ThresholdRegularizer(gamma=1e-6)
         
         scaler      = trainloader.dataset.annotations.sum().to(cfg['rank'])
         pos_weight  = trainloader.dataset.pos_weight.to(cfg['rank'])
+        #prev_correct = 0
         
         for epoch in tqdm(range(0, epochs)):
             
@@ -209,7 +228,17 @@ class WeakSupervisionTrainer(Trainer):
             else:
                 for param in model.parameters():
                     param.requires_grad = True
-            
+                    
+                    
+            #if (warm_up and epoch == 15) or (not warm_up and epoch == 10):
+            #    for g in optimizer.param_groups:
+            #        g['lr'] = 0.00001
+                    
+                    
+            #if (not warm_up and epoch == 30):
+            #    for g in optimizer.param_groups:
+            #        g['lr'] = 0.000001
+                    
             # training loop
             for batch in trainloader:
 
@@ -218,15 +247,18 @@ class WeakSupervisionTrainer(Trainer):
                 weight = batch['weight']
                 mask   = batch['mask']
                 
-                output = model(input_)
+                output, recon = model.forward_both(input_)
                 loss   = loss_fn(output, target, weight, 
                                  pos_weight, scaler) \
-                         + regularizer(hook.output)
+                         + regularizer(hook.output) \
+                         + 0.1*recon_loss(recon, input_.detach(), mask.unsqueeze(1))
 
                 optimizer.zero_grad()          
                 loss.backward()
                 optimizer.step()
-            #scheduler.step()
+                
+            #if (not warm_up) or (epoch > 5 and warm_up):
+            #    scheduler.step()
             
             #remove hook at the end of training due to interaction with evaluation hooks
             handle.remove()
@@ -234,7 +266,7 @@ class WeakSupervisionTrainer(Trainer):
             if cfg['log']:
                 model.eval()
                 if epoch % cfg['w_eval_freq'] == 0:
-                    scores, _ = self.evaluate(model, trainloader.dataset, cfg)
+                    scores, _  = self.evaluate(model, trainloader.dataset, cfg)
                     model_train_scores, _ = self.model_dice(model, trainloader.dataset, 'train')
                     model_test_scores, _  = self.model_dice(model, trainloader.dataset, 'validate')
                 wandb.log({'RF-training': scores,

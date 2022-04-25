@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-
+    
+            
 class MSELoss(nn.Module):
     
     def __init__(self):
@@ -14,7 +14,7 @@ class MSELoss(nn.Module):
         Output: loss
         """
         loss_pre = F.mse_loss(output, target, reduction="none")
-        loss     = (loss_pre * weight).sum() / max(1, weight.sum())
+        loss     = (loss_pre * weight).sum() / (max(1, weight.sum()) * 288)
         
         return loss
     
