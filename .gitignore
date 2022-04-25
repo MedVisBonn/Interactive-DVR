@@ -1,15 +1,15 @@
 # Folders
 experiments/*
-src/wandb/*
 resources/*
 data/*
 trained_models/*
 
-src/sandbox/data/
-src/sandbox/exp1
-src/sandbox/models/
-src/sandbox/trainer_logs/
-src/sandbox/wandb/
+src/wandb/*
+src/sandbox/*
+src/trainer_logs/*
+src/models/*
+src/tmp/*
+src/old/*
 
 # Notebooks
 *.ipynb
