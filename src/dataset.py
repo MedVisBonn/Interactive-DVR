@@ -12,7 +12,7 @@ from utils import *
 
 class AEDataset(Dataset):
     
-    def __init__(self, cfg, modality='reconstruction', mode='train', set=1,
+    def __init__(self, cfg, modality='reconstruction', mode='train', set=1, normalize=True,
                  augment=False, to_gpu=True, paper_init=False, smooth_label=False):
         
         self.cfg         = cfg
@@ -32,14 +32,20 @@ class AEDataset(Dataset):
             torch.save(data_in, cfg["data_dir"] + "data_in.pt")        
         
         # shape [145, 288, 145, 145]  [B, C, H, W]
-        self.input = (data_in / data_in.amax(dim=(0,1,2))).permute(1,3,0,2)[14:159]
-
+        self.normalize = normalize
+        if normalize:
+            self.input = (data_in / data_in.amax(dim=(0,1,2))).permute(1,3,0,2)[14:159]
+        else:
+            self.input = data_in.permute(1,3,0,2)[14:159]
+        
         # shape [145, 145, 145]       [B, H, W]
         self.brain_mask = torch.tensor(
             nib.load(cfg["active_mask_path"]).get_fdata(), dtype=torch.bool).permute(1,0,2)[14:159]
 
         # shape [12, 145, 145, 145]    [classes, B, H, W]
         self.tract_masks = torch.load(cfg['data_dir'] + 'tract_masks/complete.pt')
+        
+        self.set = set
         if set == 1:
             cfg['labels'] = ["Other", "CST"]
             self.label = torch.cat([self.brain_mask.unsqueeze(0).float() - \
@@ -53,8 +59,8 @@ class AEDataset(Dataset):
                              "ILF_right", "SLF_left", "SLF_right"]
             self.label = self.tract_masks[5:]
             
-        if cfg['log']:
-            wandb.config.update({'labels': cfg['labels']})
+        #if cfg['log']:
+        #    wandb.config.update({'labels': cfg['labels']})
             
         self.user = UserModel(self.label)
             
@@ -91,17 +97,19 @@ class AEDataset(Dataset):
         self.modality = modality     
         
         
-    def initial_annotation(self) -> Tensor:
+    def initial_annotation(self, seed=42) -> Tensor:
         return self.user.initial_annotation(#self.label.detach().cpu(),
                                              self.cfg["init_voxels"],
-                                             self.paper_init)
+                                             self.paper_init, 
+                                             seed=seed)
 
 
-    def refinement_annotation(self, prediction) -> Tensor:
+    def refinement_annotation(self, prediction, seed=42) -> Tensor:
         return self.user.refinement_annotation(prediction,
-                                                #self.label.detach().cpu(),
-                                                self.annotations.detach().cpu(),
-                                                self.cfg["refinement_voxels"])
+                                               #self.label.detach().cpu(),
+                                               self.annotations.detach().cpu(),
+                                               self.cfg["refinement_voxels"],
+                                               seed=seed)
 
 
     def update_annotation(self, annotations) -> None:
