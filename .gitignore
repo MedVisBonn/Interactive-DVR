@@ -11,6 +11,7 @@ src/models/*
 src/tmp/*
 src/old/*
 src/apps/*
+src/apps
 
 # Notebooks
 *.ipynb
