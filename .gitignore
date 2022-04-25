@@ -1,7 +1,6 @@
 # Folders
 experiments/*
 resources/*
-data/*
 trained_models/*
 
 src/wandb/*
