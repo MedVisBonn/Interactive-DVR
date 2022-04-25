@@ -14,15 +14,17 @@ import nibabel as nib
 from os.path import join
 from pathlib import Path
 from time import time
-from typing import Dict, Iterable, Callable, Generator, Union
+from typing import List, Dict, Iterable, Callable, Generator, Union
 import wandb
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import precision_recall_fscore_support
+from sklearn.decomposition import PCA
 import random
 import copy
 from datetime import date
 from os import makedirs, path
 from copy import deepcopy
+from tqdm.auto import tqdm
 
 def debugging(message):
     print("".center(60, "#"))
@@ -95,6 +97,47 @@ def make_path(obj: object, it: str, kind: str, modality='reconstruction') -> str
         makedirs(p)
     
     return p + obj.__class__.__name__ + '-' + str(it) + '.pt'
+
+
+def epoch_average(losses, counts):
+    losses_np = np.array(losses)
+    counts_np = np.array(counts)
+    weighted_losses = losses_np * counts_np
+    return weighted_losses.sum()/counts_np.sum()
+
+
+class EarlyStopping(object):
+    def __init__(self, mode='min', min_delta=0, patience=7):
+        self.mode = mode
+        self.min_delta = min_delta
+        self.patience = patience
+        self.best = None
+        self.num_bad_epochs = 0
+        self.is_better = None
+        
+        if mode == 'min':
+            self.is_better = lambda a, best: a < best - min_delta
+        if mode == 'max':
+            self.is_better = lambda a, best: a > best + min_delta
+
+        if patience == 0:
+            self.is_better = lambda a, b: True
+            self.step = lambda a: False
+
+    def step(self, metrics):
+        if self.best is None:
+            self.best = metrics
+            return False
+
+        if self.is_better(metrics, self.best):
+            self.num_bad_epochs = 0
+            self.best = metrics
+        else:
+            self.num_bad_epochs += 1
+
+        if self.num_bad_epochs >= self.patience:
+            return True
+        return False
 
 
 ###############################################################################
@@ -424,3 +467,18 @@ def evaluate_RF_tmp(dataset: Dataset, features: Tensor, prev_correct: Tensor,
     scores["Avg_bad_negatives"] = bad_negatives[1:].float().mean().numpy()
 
     return scores, current_correct
+
+
+def eval_pca(dataset: Dataset, cfg: str, n_components: Iterable = np.arange(0, 50)) -> Union[np.array, List[dict]]:
+    
+    features_raw = dataset.input.permute(0, 2, 3, 1).flatten(start_dim=0, end_dim=2)
+    pca = PCA(n_components=None, random_state=42)
+    features_pca = pca.fit_transform(features_raw)
+    explained_variance_ratio = pca.explained_variance_ratio_
+    scores_list = []
+
+    for i in tqdm(n_components):
+        scores, preds = evaluate_RF(dataset, features_pca[:, :i+1], cfg)
+        scores_list.append(scores)
+        
+    return np.cumsum(explained_variance_ratio), scores_list
