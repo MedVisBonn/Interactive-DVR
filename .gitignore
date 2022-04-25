@@ -12,9 +12,6 @@ src/old/*
 src/apps/*
 src/apps
 
-# Notebooks
-*.ipynb
-
 # files
 *.pt
 *.np
