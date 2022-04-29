@@ -18,18 +18,22 @@ from losses import MSELoss
 os.environ["WANDB_SILENT"] = "True"
 
 
-def scores2df(scores: Dict[str, float], m: string = 'pre_train', 
+def scores2df(scores: Dict[str, float], m: str = 'pre_train', 
               s: int = 2, i: int = 0) -> list:
     rows = []
     for key in scores:
         if 'f1' in key:
             c = key.replace('_tracts', '').rsplit('_', maxsplit=1)[0]
-            rows.append({'f1': scores[key], 'method': m, 'class': key.split('_')[0], 'set': s, 'iter': i})
+            rows.append({'f1'     : scores[key], 
+                         'method' : m, 
+                         'class'  : c, 
+                         'set'    : s, 
+                         'iter'   : i})
             
     return rows
 
 
-def eval_set_for_iter(cfg: dict, s: int, i: int, datasets: List[Dataset]) -> pd.DataFrame:
+def eval_set_for_iter(datasets: List[Dataset], s: int, i: int, cfg: dict) -> pd.DataFrame:
     
     print("\n")
     print(f"Iteration {i} - Set {s}".center(40, "-"))
@@ -123,7 +127,7 @@ def main():
     df = pd.DataFrame(columns=['f1', 'method', 'class', 'set', 'iter'])
     
     # iterate over set 1 and 2 (named differently internally)
-    for s in [2,3]:
+    for s in [3]:
         raw_set = AEDataset(cfg, modality='reconstruction', normalize=True,
                             set=s, augment=False, to_gpu=False)
         pca_set = AEDataset(cfg, modality='reconstruction', normalize=False,
@@ -137,7 +141,7 @@ def main():
         for i in range(10):
             tmp = eval_set_for_iter(cfg, s=s, i=i, datasets=datasets)
             df  = df.append(tmp, ignore_index=True)
-            df.to_pickle("tmp/tmp_df")
+            df.to_pickle("tmp/tmp_df_set3")
     
     # final clearning for readability
     df['f1']  = df['f1'].apply(lambda x: x.item())
