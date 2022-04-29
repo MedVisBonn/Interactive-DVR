@@ -173,20 +173,20 @@ class SelfSupervisionTrainer(Trainer):
     
 class WeakSupervisionTrainer(Trainer):
     
-    def __init__(self):
+    def __init__(self, mse: bool = True, regularizer: bool = True):
         super().__init__()
+        self.mse = mse
+        self.regularizer = regularizer
         
     def fit(self, model: nn.Module, trainloader: DataLoader, epochs: int,
-            lr: list, warm_up: bool, cfg: Dict[str, object]) -> None:
+            lr: list, cfg: Dict[str, object], warm_up: bool = False, log: bool = True) -> None:
         
         trainloader.dataset.augment = False
         mode_checkpoint = trainloader.dataset.mode
         trainloader.dataset.set_mode('train')
         trainloader.dataset.set_modality('segmentation')
-        
-        hook = OutputHook()
                 
-        if cfg['log']:
+        if log:
 
             len_ = trainloader.dataset.__len__()
             bs   = trainloader.batch_size
@@ -194,13 +194,16 @@ class WeakSupervisionTrainer(Trainer):
         #optimizer   = Adam([{'params': model.encoder.parameters(), 'lr': lr[0]},
         #                    {'params': model.decoder.parameters(), 'lr': lr[1]},
         #                    {'params': model.decoder_recon.parameters(), 'lr': lr[1]}])
+        #scheduler   = lr_scheduler.CosineAnnealingLR(optimizer, epochs, eta_min=lr/100, verbose=True)
+        #scheduler = lr_scheduler.MultiplicativeLR(optimizer, lambda epoch: 0.9**epoch, verbose=True)   
         
         optimizer   = Adam(model.parameters(), lr=lr)
-        #scheduler   = lr_scheduler.CosineAnnealingLR(optimizer, epochs, eta_min=lr/100, verbose=True)
-        #scheduler = lr_scheduler.MultiplicativeLR(optimizer, lambda epoch: 0.9**epoch, verbose=True)
-        loss_fn     = SEGLoss()
-        recon_loss  = MSELoss()
-        regularizer = ThresholdRegularizer(gamma=1e-6)
+        loss_fn = SEGLoss()
+        if self.mse:
+            recon_loss  = MSELoss()
+        if self.regularizer:
+            hook = OutputHook()
+            regularizer = ThresholdRegularizer(gamma=1e-6)
         
         scaler      = trainloader.dataset.annotations.sum().to(cfg['rank'])
         pos_weight  = trainloader.dataset.pos_weight.to(cfg['rank'])
@@ -210,7 +213,8 @@ class WeakSupervisionTrainer(Trainer):
             
 
             # register hook for extracting thresholded features
-            handle = model.decoder.threshold.register_forward_hook(hook)
+            if self.regularizer:
+                handle = model.decoder.threshold.register_forward_hook(hook)
             
             # Gradient Freezing
             model.train()
@@ -247,11 +251,17 @@ class WeakSupervisionTrainer(Trainer):
                 weight = batch['weight']
                 mask   = batch['mask']
                 
-                output, recon = model.forward_both(input_)
+                if self.mse:
+                    output, recon = model.forward_both(input_)
+                else:
+                    output = model(input_)
+                
                 loss   = loss_fn(output, target, weight, 
-                                 pos_weight, scaler) \
-                         + regularizer(hook.output) \
-                         + 0.1*recon_loss(recon, input_.detach(), mask.unsqueeze(1))
+                                 pos_weight, scaler)
+                if self.regularizer:
+                    loss += regularizer(hook.output)
+                if self.mse:
+                    loss += 0.1*recon_loss(recon, input_.detach(), mask.unsqueeze(1))
 
                 optimizer.zero_grad()          
                 loss.backward()
@@ -261,9 +271,10 @@ class WeakSupervisionTrainer(Trainer):
             #    scheduler.step()
             
             #remove hook at the end of training due to interaction with evaluation hooks
-            handle.remove()
+            if self.regularizer:
+                handle.remove()
             
-            if cfg['log']:
+            if log:
                 model.eval()
                 if epoch % cfg['w_eval_freq'] == 0:
                     scores, _  = self.evaluate(model, trainloader.dataset, cfg)

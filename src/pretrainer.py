@@ -45,7 +45,7 @@ class PreTrainer():
         
         self.log = log
         if self.log:
-            run = wandb.init(reinit=True, name='log_' + self.description, project='PreTrainer_test')
+            run = wandb.init(reinit=True, name='log_' + self.description, project=cfg['project'])
             #wandb.watch(self.model, log='all', log_freq=1)
         
     def inference_step(self, x):

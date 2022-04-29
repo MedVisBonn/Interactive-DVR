@@ -24,6 +24,7 @@ class DualBranchAE(nn.Module):
     
     
     def forward_both(self, x):
+        assert hasattr(self, 'decoder_recon'), 'reconstruction decoder not found'
         x_encoded = self.encoder(x)
         x_segment = self.decoder(x_encoded)
         x_recon   = self.decoder_recon(x_encoded)
