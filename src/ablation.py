@@ -96,6 +96,8 @@ def eval_config_for_set_and_iter(ablate: str, dataset: Dataset, s: int, i: int,
     # fit model - weakly supervised
     train_loader = DataLoader(dataset, batch_size=2*cfg['w_batch_size'], shuffle=True, drop_last=False)
     trainer = WeakSupervisionTrainer(mse=mse, regularizer=regularizer)
+    
+    print("starting self supervision")
     trainer.fit(teacher, train_loader, epochs=cfg['w_n_epochs'], 
                 lr=cfg['w_lr'], warm_up=True, log=False, cfg=cfg)
     
@@ -135,13 +137,13 @@ def eval_config_for_set_and_iter(ablate: str, dataset: Dataset, s: int, i: int,
 
 def main():
     # Wrapper function for ablation study
-    with open('../configs/experiment2_ablation.config', 'r') as config:
+    with open('configs/experiment2_ablation.config', 'r') as config:
         cfg = eval(config.read())
         
     df = pd.DataFrame(columns=['f1', 'ablate', 't', 'class', 'set', 'iter'])
     
     # iterate over set 1 and 2 (named differently internally)
-    for s in [2, 3]:
+    for s in [3]:
         dataset = AEDataset(cfg, modality='segmentation', normalize=True,
                             set=s, augment=False, to_gpu=True)
         
@@ -156,10 +158,11 @@ def main():
                                                    cfg     = cfg)
                 df = df.append(tmp)
                 df.to_pickle("tmp/ablation_tmp")
+        del dataset
                 
     df['f1']  = df['f1'].apply(lambda x: x.item())
     df['set'] = df['set'] - 1
-    df.to_pickle('tmp/ablation')
+    df.to_pickle('tmp/ablation_set2')
 
     
 if __name__ == '__main__':
