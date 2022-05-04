@@ -173,7 +173,7 @@ class SelfSupervisionTrainer(Trainer):
     
 class WeakSupervisionTrainer(Trainer):
     
-    def __init__(self, mse: bool = True, regularizer: bool = True):
+    def __init__(self, mse: bool = False, regularizer: bool = True):
         super().__init__()
         self.mse = mse
         self.regularizer = regularizer
