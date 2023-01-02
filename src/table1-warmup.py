@@ -36,42 +36,20 @@ def scores2df(scores: Dict[str, float], m: str = 'pre_train',
     return rows
 
 
-def eval_set_for_iter(datasets: List[Dataset], s: int, i: int, cfg: dict) -> pd.DataFrame:
+def eval_set_for_iter(dataset: Dataset, s: int, i: int, cfg: dict) -> pd.DataFrame:
     
     print("\n")
     print(f"Iteration {i} - Set {s}".center(40, "-"))
     
     # data frame
     df = pd.DataFrame(columns=['f1', 'method', 'class', 'set', 'iter'])
-
-    # raw
-    print("Raw:", end=' ')
-    datasets['raw'].clear_annotation()
-    annot = datasets['raw'].initial_annotation(seed=i)
-    datasets['raw'].update_annotation(annot)
-#
-    features_raw = datasets['raw'].input.permute(0, 2, 3, 1).flatten(start_dim=0, end_dim=2)
-    scores, preds = evaluate_RF(datasets['raw'], features_raw, cfg)
-    df = df.append(scores2df(scores, m='raw', s=s, i=i), ignore_index=True)
-    print(u'\u2713')
-    
-    # pca
-    datasets['pca'].clear_annotation()
-    annot = datasets['pca'].initial_annotation(seed=i)
-    datasets['pca'].update_annotation(annot)
-    
-    cumvar, scores_list = eval_pca(datasets['pca'], n_components=[10], cfg=cfg)
-    avrg_f1 = [s['Avg_f1_tracts'] for s in scores_list]
-    idx = np.argmax(avrg_f1)
-    df  = df.append(scores2df(scores_list[idx], m='pca', s=s, i=i), ignore_index=True)
-    print("PCA:", end=' ')
-    print(u'\u2713')
     
     # CNN
-    datasets['cnn'].clear_annotation()
-    annot = datasets['cnn'].initial_annotation(seed=i)
-    datasets['cnn'].update_annotation(annot)
-    train_loader = DataLoader(datasets['cnn'], batch_size=cfg['s_batch_size'], 
+    print("Pre-Trained:", end=' ')
+    dataset.clear_annotation()
+    annot = dataset.initial_annotation(seed=i)
+    dataset.update_annotation(annot)
+    train_loader = DataLoader(dataset, batch_size=cfg['s_batch_size'], 
                               shuffle=True, drop_last=False)
 
     model = DualBranchAE(encoder    = 'zero',
@@ -81,36 +59,30 @@ def eval_set_for_iter(datasets: List[Dataset], s: int, i: int, cfg: dict) -> pd.
                          thresholds = 'learned').to(cfg['rank'])
 
     criterion = MSELoss()
+    # description = f'Table1_{str(i)}_set{str(set)}'
     description = f'zero_{str(i)}'
     pre_trainer = PreTrainer(model, criterion, train_loader, cfg, n_epochs=cfg['s_n_epochs'], 
                              lr=cfg['s_lr'], log=True, description=description,
                              patience=8, es_mode='none')
-    print("Un-Trained:", end=' ')  
-    scores, predictions = pre_trainer.evaluate_rf()
-    df = df.append(scores2df(scores, m='un_trained', s=s, i=i), ignore_index=True)
-    print(u'\u2713')
+    #try:
+    pre_trainer.load_model()
+    #except:
+    #    pre_trainer.fit()
     
-    try:
-        pre_trainer.load_model()
-    except:
-        pre_trainer.fit()
-    
-    print("Pre-Trained:", end=' ')   
     scores, predictions = pre_trainer.evaluate_rf()
     df = df.append(scores2df(scores, m='pre_trained', s=s, i=i), ignore_index=True)
     print(u'\u2713')
 
-    train_loader = DataLoader(datasets['cnn'], batch_size=8, shuffle=True, drop_last=False)    
-    # save zero-link encoder weights
+    train_loader = DataLoader(dataset, batch_size=8, shuffle=True, drop_last=False)
+    
+    #######################
+    
     pre_trained_encoder_state = model.encoder.state_dict()
-    # move encoder to cpu to help garbage collection
     model.encoder.cpu()
-    # re-init with dual-link cross connections
     model.encoder = DualLinkEncoder(145)
-    # copy weights that fit into new encoder
     model.load_encoder_state(pre_trained_encoder_state)
     # for combined loss, store reconstruction decoder
-    # model._modules['decoder_recon'] = model._modules.pop('decoder')
+    model._modules['decoder_recon'] = model._modules.pop('decoder')
     # init untrained segmentation decoder
     model.decoder = SegmentationDecoder(n_classes  = len(cfg['labels']),
                                         thresholds = 'learned')
@@ -123,10 +95,33 @@ def eval_set_for_iter(datasets: List[Dataset], s: int, i: int, cfg: dict) -> pd.
     
     print("Re-Trained:", end=' ')
     scores, predictions = seg_trainer.evaluate(model,
-                                               datasets['cnn'],
+                                               dataset,
                                                cfg)
     
-    df = df.append(scores2df(scores, m='refined', s=s, i=i), ignore_index=True)
+    df = df.append(scores2df(scores, m='warmup', s=s, i=i), ignore_index=True)
+    print('\u2713')
+    
+    #############################
+    
+    model.encoder.cpu()
+    model.encoder = DualLinkEncoder(145)
+    model.load_encoder_state(pre_trained_encoder_state)
+    # init untrained segmentation decoder
+    model.decoder = SegmentationDecoder(n_classes    = len(cfg['labels']),
+                                          thresholds = 'learned')
+    model.to(cfg['rank'])
+    
+    seg_trainer = WeakSupervisionTrainer(mse=False, regularizer=True)
+    seg_trainer.fit(model, train_loader, epochs=cfg['w_n_epochs'], 
+                    lr=cfg['w_lr'], warm_up=True, extended_warmup=True,
+                    cfg=cfg)
+    
+    print("Re-Trained:", end=' ')
+    scores, predictions = seg_trainer.evaluate(model,
+                                               dataset,
+                                               cfg)
+    
+    df = df.append(scores2df(scores, m='extended_warmup', s=s, i=i), ignore_index=True)
     print('\u2713')
     
     return df
@@ -142,25 +137,19 @@ def main():
     
     # iterate over set 1 and 2 (named differently internally)
     for s in [2, 3]:
-        raw_set = AEDataset(cfg, modality='reconstruction', normalize=True,
-                            set=s, augment=False, to_gpu=False)
-        pca_set = AEDataset(cfg, modality='reconstruction', normalize=False,
-                            set=s, augment=False, to_gpu=False)
-        cnn_set = AEDataset(cfg, modality='segmentation', normalize=True,
+        dataset = AEDataset(cfg, modality='segmentation', normalize=True,
                             set=s, augment=False, to_gpu=True)
 
-        datasets = {'raw': raw_set, 'pca': pca_set, 'cnn': cnn_set}
-        
         # 10 runs for each experiment
         for i in range(10):
-            tmp = eval_set_for_iter(datasets=datasets, s=s, i=i, cfg=cfg)
+            tmp = eval_set_for_iter(dataset=dataset, s=s, i=i, cfg=cfg)
             df  = df.append(tmp, ignore_index=True)
-            df.to_pickle("tmp/tmp_table1_data")
+            df.to_pickle("tmp/tmp_table1_warmup_data")
     
     # final clearning for readability
     df['f1']  = df['f1'].apply(lambda x: x.item())
     df['set'] = df['set'] - 1
-    df.to_pickle("../table1_data")
+    df.to_pickle("../table1_warmup_data")
     
     if cfg['log']:
         try:

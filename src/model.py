@@ -44,3 +44,36 @@ class DualBranchAE(nn.Module):
         x_decoded = self.decoder(x_encoded)
         
         return x_decoded
+    
+    
+    @torch.no_grad()
+    def zero_cross_connections(self):
+        for name, params in self.named_parameters():
+            if 'pre' in name:
+                params.requires_grad_(False)
+                params.zero_()
+                
+                
+    @torch.no_grad()
+    def activate_cross_connections(self):
+        for name, params in self.named_modules():
+            if 'pre' in name:
+                params.requires_grad_(True)
+                params.reset_parameters()
+                
+                
+    @torch.no_grad()           
+    def load_encoder_state(self, state_dict: Dict) -> None:
+        # load all params that don't cause problems
+        incompatible, unexpected = self.encoder.load_state_dict(state_dict, strict=False)
+        # clean incompatible and unexpected keys. Ignore cross connections and
+        # remove keys related to batch norms
+        incompatible = [s for s in incompatible if 'pre' not in s]
+        unexpected   = [s for s in unexpected   if 'num_batches' not in s]
+        # extract state dict for changes
+        original_state_dict = self.encoder.state_dict()
+        # add missing params to original state dict
+        for target_param, source_param in zip(incompatible, unexpected):
+            original_state_dict[target_param] = state_dict[source_param]
+        # load state dict back into model
+        self.encoder.load_state_dict(original_state_dict)

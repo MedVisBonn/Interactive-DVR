@@ -65,6 +65,7 @@ class EncodingLayer(nn.Module):
             self.local    = LocalModule(in_channels, out_channels, size_low)
             self.regional_pre_conv = nn.Conv2d(out_channels, out_channels, 1)
             self.regional = RegionalModule(in_channels, out_channels, size_high)
+            
         else:
             self.local    = LocalModule(in_channels, out_channels, size_low)
             self.regional = RegionalModule(in_channels, out_channels, size_high)
@@ -108,7 +109,7 @@ class ZeroLinkEncoder(nn.Module):
         local, regional = self.layer3(local, regional)
         local, regional = self.layer4(local, regional)
         reginal_high_res = interpolate(regional, size=(self.size, self.size), 
-                                         mode='bilinear', align_corners=False)
+                                       mode='bilinear', align_corners=False)
         
         return torch.cat([local, reginal_high_res], dim=1)
     
@@ -148,15 +149,14 @@ class DualLinkEncoder(nn.Module):
         super().__init__()
         size_low = [ceil(size_high/(2**i)) for i in range(1, 5)]
         
-        self.layer0 = EncodingLayer(288, 88, size_high, size_low[0], link='double')
-        self.layer1 = EncodingLayer(88, 44, size_high, size_low[1], link='double')
-        self.layer2 = EncodingLayer(44, 44, size_high, size_low[2], link='double')
-        self.layer3 = EncodingLayer(44, 22, size_high, size_low[3], link='double')
-        
-        self.local4            = LocalModule(22, 22, size_high)
-        self.regional4         = RegionalModule(22, 22, size_high)
-        self.regional4_pre_conv = nn.Conv2d(22, 22, 1)
-        self.final_local_layer = LocalModule(44, 44, size_high)
+        self.layer0    = EncodingLayer(288, 88, size_high, size_low[0], link='double')
+        self.layer1    = EncodingLayer(88, 44, size_high, size_low[1], link='double')
+        self.layer2    = EncodingLayer(44, 22, size_high, size_low[2], link='double')
+        self.layer3    = EncodingLayer(22, 22, size_high, size_low[3], link='double')
+        self.local4    = LocalModule(22, 22, size_high)
+        self.regional4 = RegionalModule(22, 22, size_high)
+        #self.regional4_pre_conv = nn.Conv2d(22, 22, 1)
+        #self.final_local_layer = LocalModule(44, 44, size_high)
         
     def forward(self, x: Tensor) -> Tensor:
         input_local, input_regional = self.layer0(x)
@@ -166,8 +166,8 @@ class DualLinkEncoder(nn.Module):
 
         local, _             = self.local4(input_local)
         _, regional_high_res = self.regional4(input_regional)
-        feature_maps         = torch.cat([local, self.regional4_pre_conv(regional_high_res)], dim=1)
-    
+        #feature_maps         = torch.cat([local, self.regional4_pre_conv(regional_high_res)], dim=1)
+        feature_maps         = torch.cat([local, regional_high_res], dim=1)
         return feature_maps
     
     

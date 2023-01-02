@@ -1,0 +1,2 @@
+* refactor modality to target
+* forward "step" to logging

@@ -15,13 +15,13 @@ class AEDataset(Dataset):
     def __init__(self, cfg, modality='reconstruction', mode='train', set=1, normalize=True,
                  augment=False, to_gpu=True, paper_init=False, smooth_label=False):
         
-        self.cfg         = cfg
-        self.cfg['rank'] = 0
-        self.modality    = modality
-        self.mode        = mode
-        self.augment     = augment
-        self.to_gpu      = to_gpu
-        self.paper_init  = paper_init
+        self.cfg          = cfg
+        self.cfg['rank']  = 0
+        self.modality     = modality
+        self.mode         = mode
+        self.augment      = augment
+        self.to_gpu       = to_gpu
+        self.paper_init   = paper_init
         self.smooth_label = smooth_label
     
         
@@ -70,7 +70,7 @@ class AEDataset(Dataset):
         # [B, 1, H, W]
         self.weight = None
 
-        self.pos_weight = (5*self.brain_mask.sum() - \
+        self.pos_weight = (len(cfg['labels'])*self.brain_mask.sum() - \
                            self.label.sum((1,2,3))[None, :, None, None]) / \
                            self.label.sum((1,2,3))[None, :, None, None]
         
@@ -176,4 +176,9 @@ class AEDataset(Dataset):
 
 
     def __len__(self) -> int:
-        return self.input.shape[0]  
+        return self.input.shape[0]
+    
+    
+class AEValidationSet(Dataset):
+    pass
+    

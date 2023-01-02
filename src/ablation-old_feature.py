@@ -16,6 +16,7 @@ from trainer import WeakSupervisionTrainer
 from model import DualBranchAE
 from losses import MSELoss
 from layer import SegmentationDecoder, DualLinkEncoder
+from utils import *
 
 
 os.environ["WANDB_SILENT"] = "True"
@@ -36,8 +37,26 @@ def scores2df(scores: Dict[str, float], t: int, ablate: str = 'full',
     return rows
 
 
+def evaluate(model: nn.Module, old_features: torch.Tensor, dataset: Dataset, cfg: Dict[str, object]):
+
+    augment_checkpoint = dataset.augment
+    dataset.augment = False
+    layer = 'encoder'
+    extractor = FeatureExtractor(model, layers=[layer]) 
+    features  = extractor(dataset)[layer][:, 22:]
+    features  = torch.cat([features, old_features], dim=1)
+    features  = features.permute(0,2,3,1).numpy()
+    scores, rf_prediction = evaluate_RF(dataset, features, cfg)
+    dataset.augment = augment_checkpoint
+
+    return scores, rf_prediction
+
+
 def eval_config_for_set_and_iter(ablate: str, dataset: Dataset, s: int, i: int, 
                                  cfg: dict) -> pd.DataFrame:
+    
+    print("\n")
+    print(f"Iteration {i} - Set {s}".center(40, "-"))
     
     # data frame to return
     df = pd.DataFrame(columns=['f1', 'ablate', 't', 'class', 'set', 'iter'])
@@ -74,6 +93,9 @@ def eval_config_for_set_and_iter(ablate: str, dataset: Dataset, s: int, i: int,
     except:
         print("fitting model. Intended?")
         pre_trainer.fit()
+        
+    extractor    = FeatureExtractor(model, layers=['encoder']) 
+    old_features = extractor(dataset)['encoder']
     
     if encoder == 'dual':
         # override encoder to get cross connections and load state dict
@@ -82,9 +104,9 @@ def eval_config_for_set_and_iter(ablate: str, dataset: Dataset, s: int, i: int,
         model.encoder = DualLinkEncoder(145)
         model.load_encoder_state(pre_trained_state)
     # for combined loss, store reconstruction decoder
-    # model._modules['decoder_recon'] = model._modules.pop('decoder')
+    model._modules['decoder_recon'] = model._modules.pop('decoder')
     # init untrained segmentation decoder
-    model.decoder = SegmentationDecoder(n_classes    = len(cfg['labels']),
+    model.decoder = SegmentationDecoder(n_classes  = len(cfg['labels']),
                                         thresholds = thresholds)
     model.to(cfg['rank'])
     
@@ -100,21 +122,17 @@ def eval_config_for_set_and_iter(ablate: str, dataset: Dataset, s: int, i: int,
         # get predictions from student model
         # in first iteration, use encoder without cross connections, since they haven't been
         # learned yet
-        if (t == 0 and encoder == 'dual'):
-            model.zero_cross_connections()
-        scores, prediction = trainer.evaluate(model=model, dataset=dataset, cfg=cfg)
-        # re-init cross connections after initial prediction to train them in the following
-        # iterations
-        if (t == 0 and encoder == 'dual'):
-            model.activate_cross_connections()
-                             
         # fine-tune model with annotations from previous iteration
         if ablate != 'baseline':
             warm_up = True if t == 0 else False
             n_epochs = cfg['w_n_epochs']
             trainer.fit(model, train_loader, epochs=n_epochs, 
                         lr=cfg['w_lr'], warm_up=warm_up, log=False, cfg=cfg)
-                             
+        
+            scores, prediction = evaluate(model=model, old_features=old_features, dataset=dataset, cfg=cfg)
+        else:
+            scores, prediction = trainer.evaluate(model=model, dataset=dataset, cfg=cfg)
+            
         # update annotations with predictions from pre-refinement model
         annot = dataset.refinement_annotation(prediction=prediction, seed=i)
         dataset.update_annotation(annotations=annot)
@@ -139,14 +157,14 @@ def main():
     
     df = pd.DataFrame(columns=['f1', 'ablate', 't', 'class', 'set', 'iter'])
     # iterate over set 1 and 2 (named differently internally)
-    for s in [2, 3]:
+    for s in [3]:
         dataset = AEDataset(cfg, modality='segmentation', normalize=True,
                             set=s, augment=False, to_gpu=True)
         
         # 10 runs for each experiment
-        for i in range(10):
+        for i in range(5):
             # full
-            for ablate in ['full', 'encoder', 'regularizer', 'thresholds', 'decoder', 'baseline']:
+            for ablate in ['full']:
                 tmp = eval_config_for_set_and_iter(ablate  = ablate, 
                                                    dataset = dataset, 
                                                    s       = s, 
@@ -158,7 +176,7 @@ def main():
                 
     df['f1']  = df['f1'].apply(lambda x: x.item())
     df['set'] = df['set'] - 1
-    df.to_pickle('../ablation_noMSE_freezing')
+    df.to_pickle('../ablation_old_all_new_regional')
     
     if cfg['log']:
         wandb.alert(

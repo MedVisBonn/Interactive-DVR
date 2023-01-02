@@ -179,7 +179,8 @@ class WeakSupervisionTrainer(Trainer):
         self.regularizer = regularizer
         
     def fit(self, model: nn.Module, trainloader: DataLoader, epochs: int,
-            lr: list, cfg: Dict[str, object], warm_up: bool = False, log: bool = True) -> None:
+            lr: list, cfg: Dict[str, object], warm_up: bool = False, 
+            extended_warmup: bool = False, log: bool = True) -> None:
         
         trainloader.dataset.augment = False
         mode_checkpoint = trainloader.dataset.mode
@@ -224,6 +225,9 @@ class WeakSupervisionTrainer(Trainer):
                     for param in model.encoder.parameters():
                         param.requires_grad = False
                     model.encoder.eval()
+                    
+                    if extended_warmup:
+                        model.activate_cross_connections()
 
                 if epoch == 6:
                     for param in model.parameters():
@@ -256,17 +260,18 @@ class WeakSupervisionTrainer(Trainer):
                 else:
                     output = model(input_)
                 
-                loss   = loss_fn(output, target, weight, 
-                                 pos_weight, scaler)
+                loss = loss_fn(output, target, weight, 
+                               pos_weight, scaler)
+                
                 if self.regularizer:
                     loss += regularizer(hook.output)
                 if self.mse:
-                    loss += 0.1*recon_loss(recon, input_.detach(), mask.unsqueeze(1))
-
+                    loss += 0.5*recon_loss(recon, input_.detach(), mask.unsqueeze(1))
+                                
                 optimizer.zero_grad()          
                 loss.backward()
                 optimizer.step()
-                
+                                
             #if (not warm_up) or (epoch > 5 and warm_up):
             #    scheduler.step()
             

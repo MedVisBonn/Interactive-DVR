@@ -173,13 +173,16 @@ class PreTrainer():
                 if es_metric < best_es_metric:
                     best_es_metric = es_metric
                     self.save_model()
-            else:
+            elif self.es_mode == 'max':
                 if es_metric > best_es_metric:
                     best_es_metric = es_metric
                     self.save_model()
-            if(self.es.step(es_metric)):
-                print('Early stopping triggered!')
-                break
+            else:
+                self.save_model()
+                
+            #if(self.es.step(es_metric)):
+            #    print('Early stopping triggered!')
+            #    break
                 
         self.training_time = time() - self.training_time
         self.save_hist()

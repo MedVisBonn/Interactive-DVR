@@ -45,7 +45,7 @@ def eval_config_for_set_and_iter(ablate: str, dataset: Dataset, s: int, i: int,
     encoder     = 'zero' if (ablate == 'encoder'     or ablate == 'baseline') else 'dual'
     thresholds  = 'old'  if (ablate == 'thresholds'  or ablate == 'decoder')  else 'learned'
     regularizer = False  if (ablate == 'regularizer' or ablate == 'decoder')  else True
-    mse         = False
+    mse         = True
     
     print(f'Ablate {ablate}:')
     print(f'Encoder: {encoder} \nThresholds: {thresholds} \nRegularizer: {regularizer} \nMSE: {mse}')
@@ -82,7 +82,7 @@ def eval_config_for_set_and_iter(ablate: str, dataset: Dataset, s: int, i: int,
         model.encoder = DualLinkEncoder(145)
         model.load_encoder_state(pre_trained_state)
     # for combined loss, store reconstruction decoder
-    # model._modules['decoder_recon'] = model._modules.pop('decoder')
+    model._modules['decoder_recon'] = model._modules.pop('decoder')
     # init untrained segmentation decoder
     model.decoder = SegmentationDecoder(n_classes    = len(cfg['labels']),
                                         thresholds = thresholds)
@@ -100,21 +100,14 @@ def eval_config_for_set_and_iter(ablate: str, dataset: Dataset, s: int, i: int,
         # get predictions from student model
         # in first iteration, use encoder without cross connections, since they haven't been
         # learned yet
-        if (t == 0 and encoder == 'dual'):
-            model.zero_cross_connections()
-        scores, prediction = trainer.evaluate(model=model, dataset=dataset, cfg=cfg)
-        # re-init cross connections after initial prediction to train them in the following
-        # iterations
-        if (t == 0 and encoder == 'dual'):
-            model.activate_cross_connections()
-                             
         # fine-tune model with annotations from previous iteration
         if ablate != 'baseline':
             warm_up = True if t == 0 else False
             n_epochs = cfg['w_n_epochs']
             trainer.fit(model, train_loader, epochs=n_epochs, 
                         lr=cfg['w_lr'], warm_up=warm_up, log=False, cfg=cfg)
-                             
+        
+        scores, prediction = trainer.evaluate(model=model, dataset=dataset, cfg=cfg)
         # update annotations with predictions from pre-refinement model
         annot = dataset.refinement_annotation(prediction=prediction, seed=i)
         dataset.update_annotation(annotations=annot)
@@ -146,7 +139,7 @@ def main():
         # 10 runs for each experiment
         for i in range(10):
             # full
-            for ablate in ['full', 'encoder', 'regularizer', 'thresholds', 'decoder', 'baseline']:
+            for ablate in ['full', 'baseline']:
                 tmp = eval_config_for_set_and_iter(ablate  = ablate, 
                                                    dataset = dataset, 
                                                    s       = s, 
@@ -158,7 +151,7 @@ def main():
                 
     df['f1']  = df['f1'].apply(lambda x: x.item())
     df['set'] = df['set'] - 1
-    df.to_pickle('../ablation_noMSE_freezing')
+    df.to_pickle('../ablation_noLag_mse')
     
     if cfg['log']:
         wandb.alert(

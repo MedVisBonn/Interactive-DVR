@@ -15,7 +15,7 @@ from pretrainer import PreTrainer
 from trainer import WeakSupervisionTrainer
 from model import DualBranchAE
 from losses import MSELoss
-from layer import SegmentationDecoder, DualLinkEncoder
+from layer import DualLinkEncoder, SegmentationDecoder
 
 
 os.environ["WANDB_SILENT"] = "True"
@@ -42,19 +42,21 @@ def eval_config_for_set_and_iter(ablate: str, dataset: Dataset, s: int, i: int,
     # data frame to return
     df = pd.DataFrame(columns=['f1', 'ablate', 't', 'class', 'set', 'iter'])
     # configures ablation study
-    encoder     = 'zero' if (ablate == 'encoder'     or ablate == 'baseline') else 'dual'
-    thresholds  = 'old'  if (ablate == 'thresholds'  or ablate == 'decoder')  else 'learned'
-    regularizer = False  if (ablate == 'regularizer' or ablate == 'decoder')  else True
+    tmp         = True if ablate == 'tmp' else False
+    encoder     = 'zero'
+    thresholds  = 'learned'
+    regularizer = True
     mse         = False
     
     print(f'Ablate {ablate}:')
-    print(f'Encoder: {encoder} \nThresholds: {thresholds} \nRegularizer: {regularizer} \nMSE: {mse}')
+    print(f'TMP: {tmp}')
 
     # init model
-    model = DualBranchAE(encoder    = 'zero',
+    model = DualBranchAE(encoder    = encoder,
                          decoder    = 'reconstruction',
                          in_size    = 145,
-                         thresholds = thresholds).to(cfg['rank'])
+                         thresholds = thresholds,
+                         tmp        = tmp).to(cfg['rank'])
     
     # unsupervised pre-training
     # initial user annotation to track unsupervised feature performance
@@ -64,28 +66,28 @@ def eval_config_for_set_and_iter(ablate: str, dataset: Dataset, s: int, i: int,
     # fit model - unsupervised
     train_loader = DataLoader(dataset, batch_size=cfg['s_batch_size'], shuffle=True, drop_last=False)
     criterion    = MSELoss()
-    description  = 'zero_'
+    description  = 'zero_deep_' if tmp else 'zero_'
     description += str(i)
     pre_trainer  = PreTrainer(model, criterion, train_loader, cfg,
                               n_epochs=cfg['s_n_epochs'], lr=cfg['s_lr'], log=False,
-                              description=description, patience=8, es_mode='none')    
+                              description=description, patience=8, es_mode='none')
+        
     try:
         pre_trainer.load_model()
     except:
         print("fitting model. Intended?")
         pre_trainer.fit()
     
-    if encoder == 'dual':
-        # override encoder to get cross connections and load state dict
-        pre_trained_state = model.state_dict()
-        model.encoder.cpu()
-        model.encoder = DualLinkEncoder(145)
-        model.load_encoder_state(pre_trained_state)
+    # override encoder to get cross connections and load state dict
+    pre_trained_state = model.state_dict()
+    model.encoder.cpu()
+    model.encoder     = DualLinkEncoder(145, tmp=tmp)
+    model.load_encoder_state(pre_trained_state)
     # for combined loss, store reconstruction decoder
-    # model._modules['decoder_recon'] = model._modules.pop('decoder')
+    model._modules['decoder_recon'] = model._modules.pop('decoder')
     # init untrained segmentation decoder
     model.decoder = SegmentationDecoder(n_classes    = len(cfg['labels']),
-                                        thresholds = thresholds)
+                                          thresholds = thresholds)
     model.to(cfg['rank'])
     
     # fit model - weakly supervised
@@ -100,21 +102,18 @@ def eval_config_for_set_and_iter(ablate: str, dataset: Dataset, s: int, i: int,
         # get predictions from student model
         # in first iteration, use encoder without cross connections, since they haven't been
         # learned yet
-        if (t == 0 and encoder == 'dual'):
+        if t == 0:
             model.zero_cross_connections()
         scores, prediction = trainer.evaluate(model=model, dataset=dataset, cfg=cfg)
         # re-init cross connections after initial prediction to train them in the following
         # iterations
-        if (t == 0 and encoder == 'dual'):
+        if t == 0:
             model.activate_cross_connections()
-                             
         # fine-tune model with annotations from previous iteration
-        if ablate != 'baseline':
-            warm_up = True if t == 0 else False
-            n_epochs = cfg['w_n_epochs']
-            trainer.fit(model, train_loader, epochs=n_epochs, 
-                        lr=cfg['w_lr'], warm_up=warm_up, log=False, cfg=cfg)
-                             
+        warm_up = True if t == 0 else False
+        n_epochs = cfg['w_n_epochs']
+        trainer.fit(model, train_loader, epochs=n_epochs, 
+                    lr=cfg['w_lr'], warm_up=warm_up, log=False, cfg=cfg)
         # update annotations with predictions from pre-refinement model
         annot = dataset.refinement_annotation(prediction=prediction, seed=i)
         dataset.update_annotation(annotations=annot)
@@ -139,14 +138,15 @@ def main():
     
     df = pd.DataFrame(columns=['f1', 'ablate', 't', 'class', 'set', 'iter'])
     # iterate over set 1 and 2 (named differently internally)
-    for s in [2, 3]:
+    for s in [2]:
         dataset = AEDataset(cfg, modality='segmentation', normalize=True,
                             set=s, augment=False, to_gpu=True)
         
         # 10 runs for each experiment
-        for i in range(10):
+        for i in range(20):
+            print(f"Iteration {i}".center(40, "-"))
             # full
-            for ablate in ['full', 'encoder', 'regularizer', 'thresholds', 'decoder', 'baseline']:
+            for ablate in ['tmp', 'full']:
                 tmp = eval_config_for_set_and_iter(ablate  = ablate, 
                                                    dataset = dataset, 
                                                    s       = s, 
@@ -158,7 +158,7 @@ def main():
                 
     df['f1']  = df['f1'].apply(lambda x: x.item())
     df['set'] = df['set'] - 1
-    df.to_pickle('../ablation_noMSE_freezing')
+    df.to_pickle('../ablation_encoder_depth')
     
     if cfg['log']:
         wandb.alert(
