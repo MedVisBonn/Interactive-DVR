@@ -2,6 +2,7 @@
 experiments/*
 resources/*
 trained_models/*
+data/*
 
 src/wandb/*
 src/sandbox/*
@@ -11,6 +12,9 @@ src/tmp/*
 src/old/*
 src/apps/*
 src/studies/*
+src/experiments/*
+src/configs/*
+
 
 # files
 *.pt
