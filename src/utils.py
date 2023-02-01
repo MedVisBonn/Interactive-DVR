@@ -261,7 +261,7 @@ class OutputHook:
     def __call__(self, module, input, output):
         self.output = output
 
-
+@torch.no_grad()
 class FeatureExtractor(nn.Module):
     # https://gist.github.com/fkodom/27ed045c9051a39102e8bcf4ce31df76#file-feature_extractor_hook-py
     def __init__(self, model: nn.Module, layers: Iterable[str]):

@@ -24,7 +24,6 @@ class AEDataset(Dataset):
         self.paper_init   = paper_init
         self.smooth_label = smooth_label
     
-        
         try:
             data_in = torch.load(cfg["data_dir"] + "data_in.pt")
         except:
@@ -58,6 +57,7 @@ class AEDataset(Dataset):
             cfg['labels'] = ["Other", "IFO_left", "IFO_right", "ILF_left", \
                              "ILF_right", "SLF_left", "SLF_right"]
             self.label = self.tract_masks[5:]
+
             
         #if cfg['log']:
         #    wandb.config.update({'labels': cfg['labels']})

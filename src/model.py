@@ -3,7 +3,7 @@ from typing import Dict, Iterable, Callable, Generator, Union
 from layer import *
 
 class DualBranchAE(nn.Module):
-    def __init__(self, encoder, decoder, in_size, n_classes=5, thresholds='learned'):
+    def __init__(self, encoder, decoder, in_size, n_classes=5, thresholds='learned', recon_channel=288):
         super().__init__()
         
         if encoder == 'dual':
@@ -16,11 +16,11 @@ class DualBranchAE(nn.Module):
             self.encoder = ZeroLinkEncoder(in_size)
 
         if decoder == 'reconstruction':
-            self.decoder = ReconstructionDecoder()
+            self.decoder = ReconstructionDecoder(out_channel=recon_channel)
 
         elif decoder == 'segmentation':
             self.decoder = SegmentationDecoder(n_classes=n_classes, thresholds=thresholds)
-            self.decoder_recon = ReconstructionDecoder()
+            #self.decoder_recon = ReconstructionDecoder()
     
     
     def forward_both(self, x):

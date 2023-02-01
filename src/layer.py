@@ -281,13 +281,13 @@ class MaskedBatchNorm2d(nn.BatchNorm2d):
 
     
 class ReconstructionDecoder(nn.Module):
-    def __init__(self):
+    def __init__(self, out_channel=288):
         super().__init__()
         self.decoder = nn.Sequential(
             nn.Conv2d(44, 88, 5, stride=1, padding=2, bias=True),
             nn.BatchNorm2d(88),
             nn.PReLU(88),
-            nn.Conv2d(88, 288, 5, stride=1, padding=2, bias=True))
+            nn.Conv2d(88, out_channel, 5, stride=1, padding=2, bias=True))
         
     def forward(self, x):
         return self.decoder(x)

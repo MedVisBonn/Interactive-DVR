@@ -1,6 +1,7 @@
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import SGD, Adam, lr_scheduler
 from torch.nn.utils import clip_grad_norm_
+from torch.cuda.amp import GradScaler, autocast
 
 import wandb
 from tqdm import tqdm
@@ -25,10 +26,10 @@ class Trainer:
         features  = extractor(dataset)
         features  = features[layer].permute(0,2,3,1).numpy()
         scores, rf_prediction = evaluate_RF(dataset, features, cfg)
-                
         dataset.augment = augment_checkpoint
         
         return scores, rf_prediction
+    
     
     @torch.no_grad()
     def evaluate_tmp(self, model: nn.Module, dataset: Dataset, prev_correct: Tensor,
@@ -40,9 +41,7 @@ class Trainer:
         extractor = FeatureExtractor(model, layers=[layer]) 
         features  = extractor(dataset)
         features  = features[layer].permute(0,2,3,1).numpy()
-        print("step 2")
         scores, current_correct = evaluate_RF_tmp(dataset, features, prev_correct, cfg)
-                
         dataset.augment = augment_checkpoint
         
         return scores, current_correct
@@ -173,7 +172,9 @@ class SelfSupervisionTrainer(Trainer):
     
 class WeakSupervisionTrainer(Trainer):
     
-    def __init__(self, mse: bool = False, regularizer: bool = True):
+    def __init__(self, 
+        mse: bool = False, 
+        regularizer: bool = True):
         super().__init__()
         self.mse = mse
         self.regularizer = regularizer
@@ -199,6 +200,8 @@ class WeakSupervisionTrainer(Trainer):
         #scheduler = lr_scheduler.MultiplicativeLR(optimizer, lambda epoch: 0.9**epoch, verbose=True)   
         
         optimizer   = Adam(model.parameters(), lr=lr)
+        grad_scaler = GradScaler(enabled=True)
+        
         loss_fn = SEGLoss()
         if self.mse:
             recon_loss  = MSELoss()
@@ -221,7 +224,7 @@ class WeakSupervisionTrainer(Trainer):
             model.train()
             
             if warm_up:
-                if epoch <= 5:       
+                if epoch <= 5:
                     for param in model.encoder.parameters():
                         param.requires_grad = False
                     model.encoder.eval()
@@ -255,22 +258,25 @@ class WeakSupervisionTrainer(Trainer):
                 weight = batch['weight']
                 mask   = batch['mask']
                 
-                if self.mse:
-                    output, recon = model.forward_both(input_)
-                else:
-                    output = model(input_)
                 
-                loss = loss_fn(output, target, weight, 
-                               pos_weight, scaler)
-                
-                if self.regularizer:
-                    loss += regularizer(hook.output)
-                if self.mse:
-                    loss += 0.5*recon_loss(recon, input_.detach(), mask.unsqueeze(1))
-                                
-                optimizer.zero_grad()          
-                loss.backward()
-                optimizer.step()
+                with autocast():
+                    if self.mse:
+                        output, recon = model.forward_both(input_)
+                    else:
+                        output = model(input_)
+
+                    loss = loss_fn(output, target, weight, 
+                                   pos_weight, scaler)
+
+                    if self.regularizer:
+                        loss += regularizer(hook.output)
+                    if self.mse:
+                        loss += 0.5*recon_loss(recon, input_.detach(), mask.unsqueeze(1))
+                        
+                optimizer.zero_grad()        
+                grad_scaler.scale(loss).backward()
+                grad_scaler.step(optimizer)
+                grad_scaler.update()
                                 
             #if (not warm_up) or (epoch > 5 and warm_up):
             #    scheduler.step()
