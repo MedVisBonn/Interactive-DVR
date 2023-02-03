@@ -140,6 +140,16 @@ class EarlyStopping(object):
         return False
 
 
+def balanced_collate(batch):
+    batch = default_collate(batch)
+    for key in batch:
+        if key == 'target':
+            batch[key] = batch[key].permute(0,2,1,3,4).flatten(0,1)
+        else:
+            batch[key] = batch[key].flatten(0,1)
+    return batch
+    
+    
 ###############################################################################
 ############################### Transformations ###############################
 ###############################################################################    

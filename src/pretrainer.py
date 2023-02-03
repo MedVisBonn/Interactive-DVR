@@ -13,9 +13,9 @@ from utils import *
 class PreTrainer():
     def __init__(self, model, criterion, train_loader, cfg,
                 valid_loader=None, eval_metrics=None, lr=5e-4, patience=5, es_mode='min', 
-                description='untitled', n_epochs=10000, log=False):
+                description='untitled', n_epochs=10000, log=False, device="cuda"):
         
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device # torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.description = description
         self.cfg = cfg
         self.n_epochs = n_epochs
