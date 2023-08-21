@@ -334,7 +334,7 @@ def evaluate_RF(dataset: Dataset, features: Tensor, cfg: Dict[str, str]) \
                          oob_score=True,
                          random_state=0,
                          n_jobs=-1,
-                         max_features="auto",
+                         max_features="sqrt", # changed from "auto" because auto got removed
                          class_weight="balanced",
                          max_depth=None,
                          min_samples_leaf=cfg["min_samples_leaf"])
