@@ -343,7 +343,7 @@ def evaluate_RF(dataset: Dataset, features: Tensor, cfg: Dict[str, str]) \
     clf.fit(X_train, Y_train)
     # predict labels in test mask
     predicted_prob    = clf.predict_proba(X_test)
-    Y_predicted_prob  = torch.tensor([p[:, 1] for p in predicted_prob]).T
+    Y_predicted_prob  = torch.tensor(np.array([p[:, 1] for p in predicted_prob])).T
     Y_predicted_label = (Y_predicted_prob > 0.5)*1
 
 
