@@ -468,6 +468,130 @@ class UserModel:
                 
         return interaction_map.float() # , selection
     
+    
+    def uncertainty_refinement_annotation(self, prediction: Tensor, annotation_mask: Tensor,
+                                          uncertainty_map: Tensor, 
+                              n_samples: int, mode: int = 'single_slice', 
+                              pos_weight: float = 1, seed: int = 42) -> Tensor:
+        """ Finds the slice with the highest uncertainty across all three axis and 
+            annotates parts of it. The annotation happens in multiple steps:
+            (1) mask all voxels that are already annotated with annotation_mask
+            (2) Sample n_samples many seeding points and save their position in
+                an annotation mask
+            (3) Apply the largest quadratic brush (from a given range) to each seed
+                for which all affected voxels are foreground and add them to
+                the annotation mask as well.
+            (4) Mask the ground truth labels with the annotation mask and return
+
+        Parameters
+        ----------
+        prediction : Tensor
+            predictions of segmentation model with
+            shape n_classes x L x W x H
+
+        annotation_mask : Tensor
+            current annotation, shape n_classes x L x W x H
+
+        n_samples : int
+            number of samples per slice before brushing
+
+        Returns
+        -------
+        interaction_map : Tensor
+            new annotations, shape n_classes x L x W x H
+
+        """
+        n_classes = prediction.shape[0]
+
+        # calculate inverse class frequencies
+        inverse_size_weights = self.gt.mean((1,2,3)).sum() / self.gt.mean((1,2,3)).reshape((n_classes,1,1,1))
+
+        # calculate mask for available voxels
+        available_voxels = 1 - annotation_mask.float()
+
+        # calculate difference between truth and prediction, i.e. misclassified voxels
+        diff = torch.abs(self.gt - prediction.float()) * self.gt * available_voxels
+
+        # available voxels from uncertainty
+        uncertainty_available = uncertainty_map * available_voxels
+        
+        
+        if mode == 'single_slice':
+            # norm over classes weighted by inverse class frequency - importance weight for sampling
+            uncertainty_norm = torch.norm(uncertainty_available  * inverse_size_weights, p=1, dim=0)
+
+            # 1.1) calc sum over l1 norms, e.g. for the l1 norms for segmentation predictions
+            slice_sums = self._sum_l1_per_slice(uncertainty_norm)
+
+            # 1.2) order slices in descending order by their sum
+            axis, indices = self._order_slices_by_sum(slice_sums)
+
+            # 2.0) select slice with highest importance weight over all axes
+            random_selection = np.random.randint(0,6)
+            ax  = axis[0]
+            slc = indices[0]
+            data_location = (ax, slc)
+            selection = [slice(None)] + [slice(None)] * 3
+            selection[ax + 1] = slc
+
+            # 2.1) calculate number of samples for each class from a raw difference slice
+            diff_selection  = diff[selection]
+            t_selection     = self.gt[selection]
+            n_class_samples = self._slice_samples_per_class(diff_selection, inverse_size_weights, n_samples)
+            #print(n_class_samples.sum())
+
+            # 2.2) for each class, sample from false negatives as often as specified in n_class_samples
+            class_samples = self._sample_candidate_voxels(diff_selection, t_selection, n_class_samples=n_class_samples, seed=seed)
+
+            # 2.3) brush all samples with maximum brush from list of brushes
+            brushed_mask = self._slice_add_neighbors(class_samples, t_selection)
+
+            # 2.4) create interaction map to return
+            interaction_map = torch.zeros_like(self.gt, dtype=torch.int64)
+            interaction_map[selection] = torch.bitwise_or(interaction_map[selection], brushed_mask)
+            # interaction_map[selection] = ((interaction_map[selection].sum(0) * t_selection) > 0) * 1
+                
+        elif mode == 'per_class':
+            data_location = []
+            interaction_map = torch.zeros_like(self.gt, dtype=torch.int64)
+            for c in range(n_classes):
+                cweight = torch.eye(n_classes)[c].view(n_classes, 1, 1, 1)
+                uncertainty_norm = torch.norm(uncertainty_available * cweight, p=1, dim=0)
+                # 1.1) calc sum over l1 norms, e.g. for the l1 norms for segmentation predictions
+                slice_sums = self._sum_l1_per_slice(uncertainty_norm)
+
+                # 1.2) order slices in descending order by their sum
+                axis, indices = self._order_slices_by_sum(slice_sums)
+
+                # 2.0) select slice with highest importance weight over all axes
+                random_selection = np.random.randint(0,6)
+                ax  = axis[0]
+                slc = indices[0]
+                
+                selection = [slice(None)] + [slice(None)] * 3
+                selection[ax + 1] = slc
+
+                # 2.1) calculate number of samples for each class from a raw difference slice
+                diff_selection  = diff[selection]
+                t_selection     = self.gt[selection]
+                
+                slice_sample_weights = inverse_size_weights * cweight * n_classes / (n_classes+1) * pos_weight + \
+                                    inverse_size_weights * (1-cweight) / ( (n_classes+1) * (n_classes-1) )
+                
+                n_class_samples = self._slice_samples_per_class(t_selection, slice_sample_weights, n_samples)
+                
+                # 2.2) for each class, sample from false negatives as often as specified in n_class_samples
+                class_samples = self._sample_candidate_voxels(diff_selection, t_selection, n_class_samples=n_class_samples, seed=seed)
+
+                # 2.3) brush all samples with maximum brush from list of brushes
+                brushed_mask = self._slice_add_neighbors(class_samples, t_selection)
+
+                # 2.4) create interaction map to return
+                interaction_map[selection] = torch.bitwise_or(interaction_map[selection], brushed_mask)
+                data_location.append((axis[0], indices[0]))
+                
+        return interaction_map.float() # , selection
+    
 
 # class UserModel:
     

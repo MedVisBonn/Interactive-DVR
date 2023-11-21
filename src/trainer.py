@@ -3,7 +3,7 @@ from torch.optim import SGD, Adam, lr_scheduler
 from torch.nn.utils import clip_grad_norm_
 from torch.cuda.amp import GradScaler, autocast
 
-import wandb
+#import wandb
 from tqdm import tqdm
 
 from dataset import *

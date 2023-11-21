@@ -175,6 +175,22 @@ class AEDataset(Dataset):
                                              init=self.init, 
                                              seed=seed)
 
+    def uncertainty_refinement_annotation(self, prediction, uncertainty_map, seed=42) -> Tensor:
+        
+        if self.init == 'per_class':
+            mode = 'per_class'
+            
+        if self.init == 'three_slices':
+            mode = 'single_slice'
+        
+        
+        return self.user.uncertainty_refinement_annotation(prediction,
+                                               #self.label.detach().cpu(),
+                                               self.annotations.detach().cpu(),
+                                               uncertainty_map,
+                                               self.cfg["refinement_voxels"],
+                                               mode=mode,
+                                               seed=seed)
 
     def refinement_annotation(self, prediction, seed=42) -> Tensor:
         
