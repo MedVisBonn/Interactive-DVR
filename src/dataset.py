@@ -44,7 +44,7 @@ class AEDataset(Dataset):
             nib.load(cfg["active_mask_path"]).get_fdata(), dtype=torch.bool).permute(1,0,2)[14:159]
 
         # shape [12, 145, 145, 145]    [classes, B, H, W]
-        self.tract_masks = torch.load(cfg['data_dir'] + 'tract_masks/complete.pt')
+        self.tract_masks = torch.load(cfg['data_dir'] + 'tract_masks/complete.pt').permute(0,2,1,3)
         
         self.set = set
         if set == 1:
@@ -191,6 +191,13 @@ class AEDataset(Dataset):
                                                self.cfg["refinement_voxels"],
                                                mode=mode,
                                                seed=seed)
+        #return self.user.new_uncertainty_refinement_annotation(prediction,
+        #                                        #self.label.detach().cpu(),
+        #                                        self.annotations.detach().cpu(),
+        #                                        uncertainty_map,
+        #                                        self.cfg["refinement_voxels"],
+        #                                        mode=mode,
+        #                                        seed=seed)
 
     def refinement_annotation(self, prediction, seed=42) -> Tensor:
         
