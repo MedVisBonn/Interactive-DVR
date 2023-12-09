@@ -413,9 +413,11 @@ def uncertainty_sd(train_label, test_mask, n_classes):
     # per class
     sd_map_per_class = torch.zeros((n_classes, 145,145,145))
     for i in range(n_classes):
-        train_label_i = ~torch.tensor(train_label[:,:,:,i], dtype=torch.int8)
-        sd = torch.tensor(distance_transform_edt(train_label_i))
-        sd_map_per_class[i, test_mask == 1] = sd[test_mask == 1].float()
+        train_label_i = torch.from_numpy(train_label[:,:,:,i]).bool()
+        sd = torch.tensor(distance_transform_edt(~train_label_i))
+        sd_map_per_class[i, test_mask == 1] = sd[test_mask == 1].float()  
+    sd_map_per_class[:, annotated_voxels] = 0 # all values of annotated voxels should be 0
+    
     return spatial_distance_map, sd_map_per_class.permute(1,2,3,0)
 
 
@@ -436,10 +438,11 @@ def uncertainty_fd(train_label, features, test_mask, n_classes):
     # per class
     fd_map_per_class = torch.zeros((n_classes, 145,145,145))
     for i in range(n_classes):
-        train_label_i = torch.tensor(train_label[:,:,:,i], dtype=torch.int8)
-        annotated_features = features[train_label_i.bool()].reshape(-1, 44)
+        train_label_i = torch.from_numpy(train_label[:,:,:,i]).bool()
+        annotated_features = features[train_label_i].reshape(-1, 44)
         brain_na_mask = (torch.from_numpy(test_mask == 1)) & (train_label_i == 0)
         fd_map_per_class[i, brain_na_mask == 1] = compute_anomaly_scores(annotated_features, brain_na_mask)
+    fd_map_per_class[:, annotated_voxels] = 0 # all values of annotated voxels should be 0
 
     return anomaly_scores_map, fd_map_per_class.permute(1,2,3,0)
 
