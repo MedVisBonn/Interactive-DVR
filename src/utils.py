@@ -397,31 +397,36 @@ def calc_binary_entropy(prob):
 
 
 def uncertainty_entropy(Y_predicted_prob, n_classes, test_mask):
+    
     entropy = calc_binary_entropy(Y_predicted_prob)
     entropy_map = torch.zeros((145,145,145, n_classes))
     entropy_map[test_mask  == 1] = entropy.float()
     mean_entropy_map = entropy_map.mean(axis=-1)
-    return entropy_map, mean_entropy_map
+    return mean_entropy_map, entropy_map
 
 
 def uncertainty_sd(train_label, test_mask, n_classes):
-    # all classes
-    annotated_voxels = torch.any(torch.from_numpy(train_label), dim=-1)
-    spatial_distances = torch.tensor(distance_transform_edt(~annotated_voxels))
-    spatial_distance_map = torch.zeros((145,145,145))
-    spatial_distance_map[test_mask == 1] = spatial_distances[test_mask == 1].float()
+
+    train_label_tensor = torch.from_numpy(train_label)
+    annotated_voxels = torch.any(train_label_tensor, dim=-1)
     # per class
     sd_map_per_class = torch.zeros((n_classes, 145,145,145))
     for i in range(n_classes):
-        train_label_i = torch.from_numpy(train_label[:,:,:,i]).bool()
+        train_label_i = train_label_tensor[:,:,:,i].bool()
         sd = torch.tensor(distance_transform_edt(~train_label_i))
         sd_map_per_class[i, test_mask == 1] = sd[test_mask == 1].float()  
     sd_map_per_class[:, annotated_voxels] = 0 # all values of annotated voxels should be 0
+    # all classes
+    spatial_distance_map, _ = torch.min(sd_map_per_class, dim=0)
     
     return spatial_distance_map, sd_map_per_class.permute(1,2,3,0)
 
 
 def uncertainty_fd(train_label, features, test_mask, n_classes):
+    
+    train_label_tensor = torch.from_numpy(train_label)
+    annotated_voxels = torch.any(train_label_tensor, dim=-1)
+    brain_mask_tensor = torch.from_numpy(test_mask == 1)
     
     def compute_anomaly_scores(annotated_features, mask):
         iforest = IsolationForest(n_estimators=100, random_state=0, n_jobs=-1).fit(annotated_features)
@@ -429,27 +434,24 @@ def uncertainty_fd(train_label, features, test_mask, n_classes):
         return torch.from_numpy(1 - (anomaly_scores + 0.5)).float()
     
     # all classes
-    annotated_voxels = torch.any(torch.from_numpy(train_label), dim=-1)
     annotated_features = features[annotated_voxels].reshape(-1, 44)
-    brain_na_mask = (torch.from_numpy(test_mask == 1)) & (annotated_voxels == 0)
+    brain_na_mask = brain_mask_tensor & ~annotated_voxels
     anomaly_scores_map = torch.zeros((145,145,145))
     anomaly_scores_map[brain_na_mask] = compute_anomaly_scores(annotated_features, brain_na_mask)
 
     # per class
     fd_map_per_class = torch.zeros((n_classes, 145,145,145))
     for i in range(n_classes):
-        train_label_i = torch.from_numpy(train_label[:,:,:,i]).bool()
+        train_label_i = train_label_tensor[:,:,:,i].bool()
         annotated_features = features[train_label_i].reshape(-1, 44)
-        brain_na_mask = (torch.from_numpy(test_mask == 1)) & (train_label_i == 0)
+        brain_na_mask = brain_mask_tensor & ~train_label_i
         fd_map_per_class[i, brain_na_mask == 1] = compute_anomaly_scores(annotated_features, brain_na_mask)
     fd_map_per_class[:, annotated_voxels] = 0 # all values of annotated voxels should be 0
 
     return anomaly_scores_map, fd_map_per_class.permute(1,2,3,0)
 
 
-
-
-def evaluate_RF_with_uncertainty(dataset: Dataset, features: Tensor, cfg: Dict[str, str]) \
+def evaluate_RF_with_uncertainty(dataset: Dataset, features: Tensor, cfg: Dict[str, str], uncertainty_measure: str) \
                 -> Union[Dict[str, float], Tensor]:
 
                 ###############################
@@ -510,15 +512,13 @@ def evaluate_RF_with_uncertainty(dataset: Dataset, features: Tensor, cfg: Dict[s
     recall    = (TP + eps) / (TPplusFN + eps)
     f1        = (2 * precision * recall + eps) / ( precision + recall  + eps)
 
-
-    # uncertainty (entropy)
-    entropy_map, mean_entropy_map = uncertainty_entropy(Y_predicted_prob, n_classes, test_mask)
-
-    # uncertainty (spatial distance)
-    sd, sd_per_class = uncertainty_sd(train_label, test_mask, n_classes)
-
-    # uncertainty (feature distance)
-    fd, fd_per_class = uncertainty_fd(train_label, features, test_mask, n_classes)
+    match uncertainty_measure:
+        case 'entropy':
+            uncertainty_map, uncertainty_per_class = uncertainty_entropy(Y_predicted_prob, n_classes, test_mask)
+        case 'spatial-distance':
+            uncertainty_map, uncertainty_per_class = uncertainty_sd(train_label, test_mask, n_classes)
+        case 'feature-distance':
+            uncertainty_map, uncertainty_per_class = uncertainty_fd(train_label, features, test_mask, n_classes)
 
 
     labels = cfg["labels"]
@@ -533,8 +533,7 @@ def evaluate_RF_with_uncertainty(dataset: Dataset, features: Tensor, cfg: Dict[s
     scores["Avg_f1_tracts"] = f1[1:].mean().numpy()
     
     
-    return scores, prediction.permute(3,0,1,2), entropy_map.permute(3,0,1,2), mean_entropy_map, \
-        sd, sd_per_class.permute(3,0,1,2), fd, fd_per_class.permute(3,0,1,2)
+    return scores, prediction.permute(3,0,1,2), uncertainty_map, uncertainty_per_class.permute(3,0,1,2)
 
 
 def evaluate_RF_tmp(dataset: Dataset, features: Tensor, prev_correct: Tensor,
