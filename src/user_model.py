@@ -8,7 +8,7 @@ import random
 
 class UserModel:
     
-    def __init__(self, ground_truth: Tensor, brush_sizes=torch.arange(2,7)):
+    def __init__(self, ground_truth: Tensor, brush_sizes=[1]):
         super().__init__()
         
         # globals
@@ -196,6 +196,45 @@ class UserModel:
                 samples[i][index_coords] = 1 
         
         return samples
+
+    def _new_sample_candidate_voxels(self, slc: Tensor, ground_truth_slice: Tensor, n_samples) -> Tensor:
+        
+        # init output tensor
+        samples = torch.zeros_like(slc) # 5, 145, 145 hat auch gt_slice
+
+        # XXX: Schritte:
+        #       1. Voxel finden und indices merken
+        #       2. Annotationen aus ground truth slice ziehen (alle Klassen)
+        #       3. in samples Tensor speichern 
+
+        # Methode 1: größter Mittelwert
+        #u_mean = torch.mean(slc, dim=0) # 145,145
+        #values, indices = torch.topk(u_mean.flatten(), k=n_samples) # values, indices der [x] größten Werte
+#
+        #top_coords = torch.stack([
+        #    indices // u_mean.shape[1],  # Zeilenindizes
+        #    indices % u_mean.shape[1]     # Spaltenindizes
+        #], dim=1)
+#
+        #samples[:, top_coords[:,0], top_coords[:, 1]] = ground_truth_slice[:, top_coords[:,0], top_coords[:, 1]]
+
+        # Methode 2: größte einzelne Werte
+        u_max = torch.max(slc, dim=0) # 145,145
+        values, indices = torch.topk(u_max.values.flatten(), k=n_samples) # values, indices der [x] größten Werte
+
+        top_coords = torch.stack([
+            indices // u_max.values.shape[1],  # Zeilenindizes
+            indices % u_max.values.shape[1]     # Spaltenindizes
+        ], dim=1)
+
+        samples[:, top_coords[:,0], top_coords[:, 1]] = ground_truth_slice[:, top_coords[:,0], top_coords[:, 1]]
+
+
+        # find [x] Voxels with highest uncertainty:
+        #print(samples.sum())
+
+        return samples # has to have shape [5, 145, 145]
+
 
 
     def _slice_add_neighbors(self, class_samples: Tensor, ground_truth_slice: Tensor) -> Tensor:
@@ -592,6 +631,132 @@ class UserModel:
                 
         return interaction_map.float() # , selection
     
+
+    def new_uncertainty_refinement_annotation(self, prediction: Tensor, annotation_mask: Tensor,
+                                          uncertainty_map: Tensor, 
+                              n_samples: int, mode: int = 'single_slice', 
+                              pos_weight: float = 1, seed: int = 42) -> Tensor:
+        """ Finds the slice with the highest uncertainty across all three axis and 
+            annotates parts of it. The annotation happens in multiple steps:
+            (1) mask all voxels that are already annotated with annotation_mask
+            (2) Sample n_samples many seeding points and save their position in
+                an annotation mask
+            (3) Apply the largest quadratic brush (from a given range) to each seed
+                for which all affected voxels are foreground and add them to
+                the annotation mask as well.
+            (4) Mask the ground truth labels with the annotation mask and return
+
+        Parameters
+        ----------
+        prediction : Tensor
+            predictions of segmentation model with
+            shape n_classes x L x W x H
+
+        annotation_mask : Tensor
+            current annotation, shape n_classes x L x W x H
+
+        n_samples : int
+            number of samples per slice before brushing
+
+        Returns
+        -------
+        interaction_map : Tensor
+            new annotations, shape n_classes x L x W x H
+
+        """
+
+        # calculate mask for available voxels
+        available_voxels = 1 - annotation_mask.float()
+
+        # available voxels from uncertainty
+        uncertainty_available = uncertainty_map * available_voxels
+        
+        # NOTE : L1-Norm oder Max?
+        uncertainty_norm = torch.norm(uncertainty_available, p=1, dim=0)
+        # 1.1) calc sum over l1 norms, e.g. for the l1 norms for segmentation predictions
+        slice_sums = self._sum_l1_per_slice(uncertainty_norm)
+        # 1.2) order slices in descending order by their sum
+        axis, indices = self._order_slices_by_sum(slice_sums)
+        # 2.0) select slice with highest importance weight over all axes
+        ax  = axis[0]
+        slc = indices[0]
+        #print(ax, slc)
+        data_location = (ax, slc)
+        selection = [slice(None)] + [slice(None)] * 3
+        selection[ax + 1] = slc
+        # 2.1) calculate number of samples for each class from a raw difference slice
+        ###diff_selection  = diff[selection]
+        ###t_selection     = self.gt[selection]
+        ###n_class_samples = self._slice_samples_per_class(diff_selection, inverse_size_weights, n_samples)
+        #print(n_class_samples.sum())
+
+        ### TODO: Sample von GT auf Uncertainty umstellen.  
+        # TODO: Voxel mit größter Unsicherheit auswählen
+        uncertainty_selection = uncertainty_available[selection]
+        t_selection = self.gt[selection]
+
+        # NOTE: [x] Voxel wo Summe der Uncertainty am größten ist? Oder [x] Voxel mit den größten Uncertainty-Werten?
+        # Oder [x] Voxel wo Mean der Uncertainty am größten ist?
+
+        samples = self._new_sample_candidate_voxels(uncertainty_selection, t_selection, n_samples)
+
+        # 2.2) for each class, sample from false negatives as often as specified in n_class_samples
+        #class_samples = self._sample_candidate_voxels(diff_selection, t_selection, n_class_samples=n_class_samples, seed=seed)
+        
+        # 2.3) brush all samples with maximum brush from list of brushes
+        brushed_mask = self._slice_add_neighbors(samples, t_selection)
+        # 2.4) create interaction map to return
+        interaction_map = torch.zeros_like(self.gt, dtype=torch.int64)
+        #print('brushed mask')
+        interaction_map[selection] = torch.bitwise_or(interaction_map[selection], brushed_mask)
+        #interaction_map[selection] = torch.bitwise_or(interaction_map[selection], samples.int())
+        # interaction_map[selection] = ((interaction_map[selection].sum(0) * t_selection) > 0) * 1
+    
+        return interaction_map.float() # , selection
+    
+
+    def random_refinement_annotation(self, prediction: Tensor, annotation_mask: Tensor,
+                                          brain_mask: Tensor, 
+                              n_samples: int, mode: int = 'single_slice', 
+                              pos_weight: float = 1, seed: int = 42) -> Tensor:
+    	
+        annotated_voxels = torch.any(annotation_mask, axis=0)
+        brain_na_mask = brain_mask & ~annotated_voxels
+        x = torch.zeros((5,145,145,145))
+        x[:, brain_na_mask] = 1     # 5, 145, 145, 145
+        random_mask = torch.zeros((145,145,145))
+        random_mask[brain_na_mask] = 1   # 145, 145, 145
+
+        #np.random.seed(seed)
+        random_axis = np.random.randint(0,3)
+        match random_axis:
+            case 0:
+                sclice_sums = torch.sum(random_mask, axis=(1,2))
+            case 1:
+                sclice_sums = torch.sum(random_mask, axis=(0,2))
+            case 2:
+                sclice_sums = torch.sum(random_mask, axis=(0,1))
+        
+        valid_slice_indices = torch.where(sclice_sums >= n_samples)[0]
+        random_slice_index = np.random.choice(valid_slice_indices)     
+
+        ax = random_axis
+        slc = random_slice_index
+        #print(ax, slc)
+        data_location = (ax, slc)
+        selection = [slice(None)] + [slice(None)] * 3
+        selection[ax + 1] = slc
+
+        random_selection = x[selection]
+        t_selection = self.gt[selection]
+
+        samples = self._new_sample_candidate_voxels(random_selection, t_selection, n_samples)
+        brushed_mask = self._slice_add_neighbors(samples, t_selection)
+        interaction_map = torch.zeros_like(self.gt, dtype=torch.int64)
+        interaction_map[selection] = torch.bitwise_or(interaction_map[selection], brushed_mask)
+        return interaction_map.float() # , selection
+
+         
 
 # class UserModel:
     
