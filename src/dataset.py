@@ -64,7 +64,7 @@ class AEDataset(Dataset):
         #if cfg['log']:
         #    wandb.config.update({'labels': cfg['labels']})
             
-        self.user = UserModel(self.label)
+        self.user = UserModel(self.label, cfg)
             
         # [classes, B, H, W]
         self.annotations = None

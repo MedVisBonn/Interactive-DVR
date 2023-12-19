@@ -8,12 +8,30 @@ import random
 
 class UserModel:
     
-    def __init__(self, ground_truth: Tensor, brush_sizes=[1]):
+    def __init__(self, ground_truth: Tensor, cfg: dict, brush_sizes=torch.arange(2,7)):
         super().__init__()
         
         # globals
         self.gt = ground_truth.float() # nd array or float tensor?
-        self.brush_sizes = brush_sizes
+        if cfg['brush']:
+            self.brush_sizes = brush_sizes
+        else:
+            self.brush_sizes = [1]
+        
+        if cfg['slice_selection'] == 'mean':
+            self.slice_selection = 'mean'
+        elif cfg['slice_selection'] == 'max':
+            self.slice_selection = 'max'
+        else:
+            raise ValueError('Invalid slice selection method. Choose between "mean" and "max".')
+
+        if cfg['voxel_selection'] == 'mean':
+            self.voxel_selection = 'mean'
+        elif cfg['voxel_selection'] == 'max':
+            self.voxel_selection = 'max'
+        else:
+            raise ValueError('Invalid voxel selection method. Choose between "mean" and "max".')
+        
         
         
         # statistics to track
@@ -199,38 +217,27 @@ class UserModel:
 
     def _new_sample_candidate_voxels(self, slc: Tensor, ground_truth_slice: Tensor, n_samples) -> Tensor:
         
-        # init output tensor
-        samples = torch.zeros_like(slc) # 5, 145, 145 hat auch gt_slice
-
         # XXX: Schritte:
         #       1. Voxel finden und indices merken
         #       2. Annotationen aus ground truth slice ziehen (alle Klassen)
         #       3. in samples Tensor speichern 
 
-        # Methode 1: größter Mittelwert
-        #u_mean = torch.mean(slc, dim=0) # 145,145
-        #values, indices = torch.topk(u_mean.flatten(), k=n_samples) # values, indices der [x] größten Werte
-#
-        #top_coords = torch.stack([
-        #    indices // u_mean.shape[1],  # Zeilenindizes
-        #    indices % u_mean.shape[1]     # Spaltenindizes
-        #], dim=1)
-#
-        #samples[:, top_coords[:,0], top_coords[:, 1]] = ground_truth_slice[:, top_coords[:,0], top_coords[:, 1]]
+        # init output tensor
+        samples = torch.zeros_like(slc) # 5, 145, 145 hat auch gt_slice
 
-        # Methode 2: größte einzelne Werte
-        u_max = torch.max(slc, dim=0) # 145,145
-        values, indices = torch.topk(u_max.values.flatten(), k=n_samples) # values, indices der [x] größten Werte
-
+        if self.voxel_selection == 'mean':
+            uncertainty = torch.mean(slc, dim=0)
+        else:
+            uncertainty = torch.max(slc, dim=0).values
+        
+        values, indices = torch.topk(uncertainty.flatten(), k=n_samples) # values, indices der [x] größten Werte
         top_coords = torch.stack([
-            indices // u_max.values.shape[1],  # Zeilenindizes
-            indices % u_max.values.shape[1]     # Spaltenindizes
-        ], dim=1)
+            indices // uncertainty.shape[1],  # Zeilenindizes
+            indices % uncertainty.shape[1]     # Spaltenindizes
+        ], dim=1)        
 
         samples[:, top_coords[:,0], top_coords[:, 1]] = ground_truth_slice[:, top_coords[:,0], top_coords[:, 1]]
 
-
-        # find [x] Voxels with highest uncertainty:
         #print(samples.sum())
 
         return samples # has to have shape [5, 145, 145]
@@ -432,10 +439,13 @@ class UserModel:
         
         if mode == 'single_slice':
             # norm over classes weighted by inverse class frequency - importance weight for sampling
-            diff_norm = torch.norm(diff  * inverse_size_weights, p=1, dim=0)
+            if self.slice_selection == 'mean':
+                diff_ = torch.mean(diff  * inverse_size_weights, dim=0)
+            else:
+                diff_ = torch.max(diff  * inverse_size_weights, dim=0).values
 
             # 1.1) calc sum over l1 norms, e.g. for the l1 norms for segmentation predictions
-            slice_sums = self._sum_l1_per_slice(diff_norm)
+            slice_sums = self._sum_l1_per_slice(diff_)
 
             # 1.2) order slices in descending order by their sum
             axis, indices = self._order_slices_by_sum(slice_sums)
@@ -671,10 +681,12 @@ class UserModel:
         # available voxels from uncertainty
         uncertainty_available = uncertainty_map * available_voxels
         
-        # NOTE : L1-Norm oder Max?
-        uncertainty_norm = torch.norm(uncertainty_available, p=1, dim=0)
+        if self.slice_selection == 'mean':
+            uncertainty = torch.mean(uncertainty_available, dim=0)
+        else:
+            uncertainty = torch.max(uncertainty_available, dim=0).values
         # 1.1) calc sum over l1 norms, e.g. for the l1 norms for segmentation predictions
-        slice_sums = self._sum_l1_per_slice(uncertainty_norm)
+        slice_sums = self._sum_l1_per_slice(uncertainty)
         # 1.2) order slices in descending order by their sum
         axis, indices = self._order_slices_by_sum(slice_sums)
         # 2.0) select slice with highest importance weight over all axes

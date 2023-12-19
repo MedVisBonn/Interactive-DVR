@@ -451,7 +451,7 @@ def uncertainty_fd(train_label, features, test_mask, n_classes):
     return anomaly_scores_map, fd_map_per_class.permute(1,2,3,0)
 
 
-def evaluate_RF_with_uncertainty(dataset: Dataset, features: Tensor, cfg: Dict[str, str], uncertainty_measure: str) \
+def evaluate_RF_with_uncertainty(dataset: Dataset, features: Tensor, cfg: Dict[str, str], uncertainty_measures: List[str]) \
                 -> Union[Dict[str, float], Tensor]:
 
                 ###############################
@@ -512,13 +512,29 @@ def evaluate_RF_with_uncertainty(dataset: Dataset, features: Tensor, cfg: Dict[s
     recall    = (TP + eps) / (TPplusFN + eps)
     f1        = (2 * precision * recall + eps) / ( precision + recall  + eps)
 
-    match uncertainty_measure:
-        case 'entropy':
-            uncertainty_map, uncertainty_per_class = uncertainty_entropy(Y_predicted_prob, n_classes, test_mask)
-        case 'spatial-distance':
-            uncertainty_map, uncertainty_per_class = uncertainty_sd(train_label, test_mask, n_classes)
-        case 'feature-distance':
-            uncertainty_map, uncertainty_per_class = uncertainty_fd(train_label, features, test_mask, n_classes)
+    uncertainty_maps = {}
+    uncertainty_per_class_maps = {}
+
+    for measure in uncertainty_measures:
+        match measure:
+            case 'ground-truth':
+                continue
+                #break # NOTE: eventuell durch pass ersetzen. (für LogReg)
+            case 'random':
+                break
+            case 'entropy':
+                uncertainty_map, uncertainty_per_class = uncertainty_entropy(Y_predicted_prob, n_classes, test_mask)
+            case 'spatial-distance':
+                uncertainty_map, uncertainty_per_class = uncertainty_sd(train_label, test_mask, n_classes)
+            case 'feature-distance':
+                uncertainty_map, uncertainty_per_class = uncertainty_fd(train_label, features, test_mask, n_classes)
+            case _:
+                raise ValueError(f"Uncertainty measure {measure} not implemented")
+
+        uncertainty_maps[measure] = uncertainty_map
+        uncertainty_per_class_maps[measure] = uncertainty_per_class.permute(3,0,1,2)
+
+    #print(uncertainty_maps)
 
 
     labels = cfg["labels"]
@@ -533,7 +549,7 @@ def evaluate_RF_with_uncertainty(dataset: Dataset, features: Tensor, cfg: Dict[s
     scores["Avg_f1_tracts"] = f1[1:].mean().numpy()
     
     
-    return scores, prediction.permute(3,0,1,2), uncertainty_map, uncertainty_per_class.permute(3,0,1,2)
+    return scores, prediction.permute(3,0,1,2), uncertainty_maps, uncertainty_per_class_maps
 
 
 def evaluate_RF_tmp(dataset: Dataset, features: Tensor, prev_correct: Tensor,
