@@ -3,20 +3,20 @@ from typing import Dict, Iterable, Callable, Generator, Union
 from layer import *
 
 class DualBranchAE(nn.Module):
-    def __init__(self, encoder, decoder, in_size, n_classes=5, thresholds='learned', recon_channel=288):
+    def __init__(self, encoder, decoder, in_size, n_classes=5, thresholds='learned', dropout=False, dropout_rate=0.2, recon_channel=288):
         super().__init__()
         
         if encoder == 'dual':
-            self.encoder = DualLinkEncoder(in_size)
+            self.encoder = DualLinkEncoder(in_size, dropout, dropout_rate)
 
         elif encoder == 'single':
-            self.encoder = SingleLinkEncoder(in_size)
+            self.encoder = SingleLinkEncoder(in_size, dropout, dropout_rate)
 
         elif encoder == 'zero':
-            self.encoder = ZeroLinkEncoder(in_size)
+            self.encoder = ZeroLinkEncoder(in_size, dropout, dropout_rate)
 
         if decoder == 'reconstruction':
-            self.decoder = ReconstructionDecoder(out_channel=recon_channel)
+            self.decoder = ReconstructionDecoder(out_channel=recon_channel, dropout=dropout, dropout_rate=dropout_rate)
 
         elif decoder == 'segmentation':
             self.decoder = SegmentationDecoder(n_classes=n_classes, thresholds=thresholds)
