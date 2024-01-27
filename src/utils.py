@@ -310,83 +310,6 @@ class FeatureExtractor(nn.Module):
 
 
 
-def evaluate_RF(dataset: Dataset, features: Tensor, cfg: Dict[str, str]) \
-                -> Union[Dict[str, float], Tensor]:
-
-                ###############################
-                ##### TRAIN RANDOM FOREST #####
-                ###############################
-                
-    train_mask  = dataset.weight.detach().cpu().squeeze().numpy()    #.permute(0,2,3,1).repeat(1,1,1,44).numpy()
-    test_mask   = dataset.brain_mask.detach().cpu().numpy()#.unsqueeze(3).repeat(1,1,1,44).numpy()
-    train_label = dataset.annotations.detach().cpu().permute(1,2,3,0).numpy()
-    test_label  = dataset.label.detach().cpu().permute(1,2,3,0).numpy()
-    
-    # Input - Mask voxels that are not labelled before flattening the input
-    X_train = features.reshape((-1, features.shape[-1]))[train_mask.reshape(-1) == 1]
-    X_test  = features.reshape((-1, features.shape[-1]))[test_mask.reshape(-1)  == 1]
-    # Target - Same as above. Mask before flattening
-    Y_train = train_label.reshape((-1, train_label.shape[-1]))[train_mask.reshape(-1) == 1]
-    Y_test  = test_label.reshape((-1,  train_label.shape[-1]))[test_mask.reshape(-1)  == 1]
-
-    # Init Random Forest Classifier
-    clf = RandomForestClassifier(n_estimators=100,
-                         bootstrap=True,
-                         oob_score=True,
-                         random_state=0,
-                         n_jobs=-1,
-                         max_features="sqrt", # changed from "auto" because auto got removed
-                         class_weight="balanced",
-                         max_depth=None,
-                         min_samples_leaf=cfg["min_samples_leaf"])
-
-    # Train
-    clf.fit(X_train, Y_train)
-    # predict labels in test mask
-    predicted_prob    = clf.predict_proba(X_test)
-    Y_predicted_prob  = torch.tensor(np.array([p[:, 1] for p in predicted_prob])).T
-    Y_predicted_label = (Y_predicted_prob > 0.5)*1
-
-
-                ###############################
-                ####### Save Prediction #######
-                ###############################
-                
-    n_classes = len(cfg['labels'])
-    prediction = torch.zeros((145,145,145, n_classes))
-    prediction.view(-1, n_classes)[test_mask.reshape(-1)  == 1] = Y_predicted_label.float()
-
-                ###############################
-                ##### Evaluate Prediction #####
-                ###############################
-
-    # Constant for numerical stability
-    eps = 1e-5
-    # statictics for precision, recall and Dice (f1)
-    TP       = (Y_predicted_label * Y_test).sum(axis=0)
-    TPplusFP = Y_predicted_label.sum(axis=0)
-    TPplusFN = Y_test.sum(axis=0)
-
-    precision = (TP + eps) / (TPplusFP + eps)
-    recall    = (TP + eps) / (TPplusFN + eps)
-    f1        = (2 * precision * recall + eps) / ( precision + recall  + eps)
-
-    labels = cfg["labels"]
-    scores = {}
-    for c in range(len(labels)):
-        scores[f"{labels[c]}_precision"] = precision[c].numpy()
-        scores[f"{labels[c]}_recall"] = recall[c].numpy()
-        scores[f"{labels[c]}_f1"] = f1[c].numpy()
-
-    scores["Avg_prec_tracts"] = precision[1:].mean().numpy()
-    scores["Avg_recall_tracts"] = recall[1:].mean().numpy()
-    scores["Avg_f1_tracts"] = f1[1:].mean().numpy()
-    
-    
-
-    return scores, prediction.permute(3,0,1,2)
-
-
 def calc_binary_entropy(prob):
     eps = 1e-5
     
@@ -451,7 +374,7 @@ def uncertainty_fd(train_label, features, test_mask, n_classes):
     return anomaly_scores_map, fd_map_per_class.permute(1,2,3,0)
 
 
-def evaluate_RF_with_uncertainty(dataset: Dataset, features: Tensor, cfg: Dict[str, str], uncertainty_measures: List[str]) \
+def evaluate_RF(dataset: Dataset, features: Tensor, cfg: Dict[str, str], uncertainty_measures: List[str]) \
                 -> Union[Dict[str, float], Tensor]:
 
                 ###############################
@@ -519,7 +442,6 @@ def evaluate_RF_with_uncertainty(dataset: Dataset, features: Tensor, cfg: Dict[s
         match measure:
             case 'ground-truth':
                 continue
-                #break # NOTE: eventuell durch pass ersetzen. (für LogReg)
             case 'random':
                 break
             case 'entropy':
