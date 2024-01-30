@@ -374,7 +374,7 @@ def uncertainty_fd(train_label, features, test_mask, n_classes):
     return anomaly_scores_map, fd_map_per_class.permute(1,2,3,0)
 
 
-def evaluate_RF(dataset: Dataset, features: Tensor, cfg: Dict[str, str], uncertainty_measures: List[str]) \
+def evaluate_RF(dataset: Dataset, features: Tensor, cfg: Dict[str, str], uncertainty_measures: List[str], tta=False) \
                 -> Union[Dict[str, float], Tensor]:
 
                 ###############################
@@ -386,11 +386,23 @@ def evaluate_RF(dataset: Dataset, features: Tensor, cfg: Dict[str, str], uncerta
     train_label = dataset.annotations.detach().cpu().permute(1,2,3,0).numpy()
     test_label  = dataset.label.detach().cpu().permute(1,2,3,0).numpy()
     
-    # Input - Mask voxels that are not labelled before flattening the input
-    X_train = features.reshape((-1, features.shape[-1]))[train_mask.reshape(-1) == 1]
-    X_test  = features.reshape((-1, features.shape[-1]))[test_mask.reshape(-1)  == 1]
-    # Target - Same as above. Mask before flattening
-    Y_train = train_label.reshape((-1, train_label.shape[-1]))[train_mask.reshape(-1) == 1]
+    if tta:
+        f = np.stack(features, axis=0)  # (n_tta, 145, 145, 145, 44)
+        train_m = np.repeat(train_mask[np.newaxis, ...], len(features), axis=0)  # (n_tta, 145, 145, 145)
+        test_m = np.repeat(test_mask[np.newaxis, ...], len(features), axis=0)  # (n_tta, 145, 145, 145)
+        train_l = np.repeat(train_label[np.newaxis, ...], len(features), axis=0)  # (n_tta, 145, 145, 145, 5)
+
+        X_train = f.reshape((-1, f.shape[-1]))[train_m.reshape(-1) == 1]    # (n_tta*train_voxels, 44)
+        X_test = f.reshape((-1, f.shape[-1]))[test_m.reshape(-1) == 1]    # (n_tta*844350, 44)
+        Y_train = train_l.reshape((-1, train_l.shape[-1]))[train_m.reshape(-1) == 1]   # (n_tta*train_voxels, 5)
+    
+    else:
+        # Input - Mask voxels that are not labelled before flattening the input
+        X_train = features.reshape((-1, features.shape[-1]))[train_mask.reshape(-1) == 1]
+        X_test  = features.reshape((-1, features.shape[-1]))[test_mask.reshape(-1)  == 1]
+        # Target - Same as above. Mask before flattening
+        Y_train = train_label.reshape((-1, train_label.shape[-1]))[train_mask.reshape(-1) == 1]
+
     Y_test  = test_label.reshape((-1,  train_label.shape[-1]))[test_mask.reshape(-1)  == 1]
 
     # Init Random Forest Classifier
@@ -409,6 +421,8 @@ def evaluate_RF(dataset: Dataset, features: Tensor, cfg: Dict[str, str], uncerta
     # predict labels in test mask
     predicted_prob    = clf.predict_proba(X_test)
     Y_predicted_prob  = torch.tensor(np.array([p[:, 1] for p in predicted_prob])).T
+    if tta:
+        Y_predicted_prob = Y_predicted_prob.reshape((len(features), 844350, 5)).mean(axis=0)
     Y_predicted_label = (Y_predicted_prob > 0.5)*1
 
 
