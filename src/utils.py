@@ -7,7 +7,7 @@ Created on Tue Nov  3 15:02:19 2020
 """
 import numpy as np
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, default_collate
 from torch import nn, Tensor
 import torch.nn.functional as F
 import nibabel as nib
@@ -271,7 +271,6 @@ class OutputHook:
     def __call__(self, module, input, output):
         self.output = output
 
-@torch.no_grad()
 class FeatureExtractor(nn.Module):
     # https://gist.github.com/fkodom/27ed045c9051a39102e8bcf4ce31df76#file-feature_extractor_hook-py
     def __init__(self, model: nn.Module, layers: Iterable[str]):
