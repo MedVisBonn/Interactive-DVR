@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import torch
 from torch import Tensor
@@ -6,9 +7,89 @@ from torchvision import transforms
 import nibabel as nib
 import nrrd
 import random
+from omegaconf import OmegaConf
 
 from user_model import UserModel
 from utils import *
+
+
+
+def get_train_loader(
+    cfg: OmegaConf
+):
+    data_dir = cfg["data_dir"]
+    if cfg.subjects == 'all':
+        subject_dirs = [
+            d for d in os.listdir(data_dir) 
+            if os.path.isdir(os.path.join(data_dir, d))
+            and 'corrupted' not in d
+        ]
+        n_subjects     = len(subject_dirs)
+        train_subjects = subject_dirs[n_subjects//10:]
+        val_subjects   = subject_dirs[:n_subjects//10]
+        train_loader = DataLoader(
+            PretrainingDataset(train_subjects, data_dir),
+            batch_size=cfg.batch_size,
+            shuffle=True,
+            num_workers=cfg.num_workers,
+            pin_memory=True,
+            drop_last=False,
+        )
+        val_loader = DataLoader(
+            PretrainingDataset(val_subjects, data_dir),
+            batch_size=cfg.batch_size,
+            shuffle=True,
+            num_workers=cfg.num_workers,
+            pin_memory=True,
+            drop_last=False,
+        )
+
+    else:
+        train_loader = DataLoader(
+            PretrainingDataset(cfg.subjects, data_dir),
+            batch_size=cfg.batch_size,
+            shuffle=True,
+            num_workers=cfg.num_workers,
+            pin_memory=True,
+            drop_last=False,
+        )
+        val_loader = None
+
+    return train_loader, val_loader
+
+class PretrainingDataset(Dataset):
+    
+    def __init__(
+        self, 
+        cfg, 
+    ):
+        self.data_dir = cfg["data_dir"]
+        subject_dirs = [
+            d for d in os.listdir(self.data_dir) 
+            if os.path.isdir(os.path.join(self.data_dir, d))
+            and 'corrupted' not in d
+        ]
+        if isinstance(cfg['subjects'], list):
+            subject_dirs = [d for d in subject_dirs if d in cfg['subjects']]
+
+        self.data_index = []
+        for subject in subject_dirs:
+            slice_dir = f'{self.data_dir}/{subject}/Diffusion/data'
+            slice_files = [
+                f'{subject}/Diffusion/data/{f}' for f in os.listdir(slice_dir) 
+                if os.path.isfile(os.path.join(slice_dir, f))
+            ]
+            self.data_index += slice_files
+
+    def __len__(self):
+        return len(self.data_index)
+    
+    def __getitem__(self, idx):
+        file_name = f'{self.data_dir}/{self.data_index[idx]}'
+        data = torch.tensor(nib.load(file_name).get_fdata()).float()
+
+        return data
+
 
 class AEDataset(Dataset):
     

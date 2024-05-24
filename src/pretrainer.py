@@ -11,9 +11,22 @@ from utils import *
 
 
 class PreTrainer():
-    def __init__(self, model, criterion, train_loader, cfg,
-                valid_loader=None, eval_metrics=None, lr=5e-4, patience=5, es_mode='min', 
-                description='untitled', n_epochs=10000, log=False, device="cuda"):
+    def __init__(
+        self, 
+        model, 
+        criterion, 
+        train_loader, 
+        cfg,
+        valid_loader=None, 
+        eval_metrics=None, 
+        lr=5e-4, 
+        patience=5, 
+        es_mode='min', 
+        description='untitled', 
+        n_epochs=10000, 
+        log=False, 
+        device="cuda"
+    ):
         
         self.device = device # torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.description = description
@@ -106,20 +119,20 @@ class PreTrainer():
         
         return average_loss
     
-    @torch.no_grad()
-    def evaluate_rf(self) -> Union[Dict[str, Tensor], Tensor]:
+    # @torch.no_grad()
+    # def evaluate_rf(self) -> Union[Dict[str, Tensor], Tensor]:
         
-        augment_checkpoint = self.train_loader.dataset.augment
-        self.train_loader.dataset.augment = False
-        layer = 'encoder'
-        extractor = FeatureExtractor(self.model, layers=[layer]) 
-        features  = extractor(self.train_loader.dataset)
-        features  = features[layer].permute(0,2,3,1).numpy()
-        scores, rf_prediction = evaluate_RF(self.train_loader.dataset, features, self.cfg)
+    #     augment_checkpoint = self.train_loader.dataset.augment
+    #     self.train_loader.dataset.augment = False
+    #     layer = 'encoder'
+    #     extractor = FeatureExtractor(self.model, layers=[layer]) 
+    #     features  = extractor(self.train_loader.dataset)
+    #     features  = features[layer].permute(0,2,3,1).numpy()
+    #     scores, rf_prediction = evaluate_RF(self.train_loader.dataset, features, self.cfg)
                 
-        self.train_loader.dataset.augment = augment_checkpoint
+    #     self.train_loader.dataset.augment = augment_checkpoint
         
-        return scores, rf_prediction
+    #     return scores, rf_prediction
     
     
     @torch.no_grad()
@@ -157,14 +170,16 @@ class PreTrainer():
         for epoch in progress_bar:      
             self.model.train()
             train_loss = self.train_epoch()
-            
-            self.model.eval()
-            valid_loss = self.eval_epoch()
+            if self.valid_loader is None:
+                valid_loss = train_loss
+            else:
+                self.model.eval()
+                valid_loss = self.eval_epoch()
             self.scheduler.step(valid_loss)
-            scores, rf_prediction = self.evaluate_rf()
-            self.history['rf scores'].append(scores['Avg_f1_tracts'])
-            if self.log:
-                wandb.log({'metrics': scores})
+            # scores, rf_prediction = self.evaluate_rf()
+            # self.history['rf scores'].append(scores['Avg_f1_tracts'])
+            # if self.log:
+            #     wandb.log({'metrics': scores})
             
             epoch_summary = [f"Epoch {epoch+1}"] + [f" - {key}: {self.history[key][-1]:.4f} |" for key in self.history] + [ f"ES epochs: {self.es.num_bad_epochs}"]
             progress_bar.set_description("".join(epoch_summary))

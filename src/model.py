@@ -2,8 +2,29 @@ from typing import Dict, Iterable, Callable, Generator, Union
 
 from layer import *
 
+
+
+def get_model(
+    cfg
+):
+    model = DualBranchAE(
+        encoder=cfg.model.encoder,
+        decoder=cfg.model.decoder,
+        in_size=cfg.model.in_size,
+    )
+    
+    return model
+
 class DualBranchAE(nn.Module):
-    def __init__(self, encoder, decoder, in_size, n_classes=5, thresholds='learned', recon_channel=288):
+    def __init__(
+        self, 
+        encoder, 
+        decoder, 
+        in_size, 
+        n_classes=5, 
+        thresholds='learned', 
+        recon_channel=288
+    ):
         super().__init__()
         
         if encoder == 'dual':
@@ -21,29 +42,6 @@ class DualBranchAE(nn.Module):
         elif decoder == 'segmentation':
             self.decoder = SegmentationDecoder(n_classes=n_classes, thresholds=thresholds)
             #self.decoder_recon = ReconstructionDecoder()
-    
-    
-    def forward_both(self, x):
-        assert hasattr(self, 'decoder_recon'), 'reconstruction decoder not found'
-        x_encoded = self.encoder(x)
-        x_segment = self.decoder(x_encoded)
-        x_recon   = self.decoder_recon(x_encoded)
-        
-        return x_segment, x_recon
-    
-    
-    def forward_features(self, x):
-        x_encoded = self.encoder(x)
-        x_decoded = self.decoder(x_encoded)
-        
-        return x_decoded, x_encoded
-    
-    
-    def forward(self, x):
-        x_encoded = self.encoder(x)
-        x_decoded = self.decoder(x_encoded)
-        
-        return x_decoded
     
     
     @torch.no_grad()
@@ -77,3 +75,26 @@ class DualBranchAE(nn.Module):
             original_state_dict[target_param] = state_dict[source_param]
         # load state dict back into model
         self.encoder.load_state_dict(original_state_dict)
+
+
+    def forward_both(self, x):
+        assert hasattr(self, 'decoder_recon'), 'reconstruction decoder not found'
+        x_encoded = self.encoder(x)
+        x_segment = self.decoder(x_encoded)
+        x_recon   = self.decoder_recon(x_encoded)
+        
+        return x_segment, x_recon
+    
+    
+    def forward_features(self, x):
+        x_encoded = self.encoder(x)
+        x_decoded = self.decoder(x_encoded)
+        
+        return x_decoded, x_encoded
+    
+    
+    def forward(self, x):
+        x_encoded = self.encoder(x)
+        x_decoded = self.decoder(x_encoded)
+        
+        return x_decoded
