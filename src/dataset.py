@@ -28,15 +28,21 @@ def get_train_loader(
         train_subjects = subject_dirs[n_subjects//10:]
         val_subjects   = subject_dirs[:n_subjects//10]
         train_loader = DataLoader(
-            PretrainingDataset(train_subjects, data_dir),
+            PretrainingDataset(
+                subjects=train_subjects, 
+                data_dir=data_dir
+            ),
             batch_size=cfg.batch_size,
             shuffle=True,
             num_workers=cfg.num_workers,
             pin_memory=True,
             drop_last=False,
         )
-        val_loader = DataLoader(
-            PretrainingDataset(val_subjects, data_dir),
+        valid_loader = DataLoader(
+            PretrainingDataset(
+                subjects=val_subjects, 
+                data_dir=data_dir
+            ),
             batch_size=cfg.batch_size,
             shuffle=True,
             num_workers=cfg.num_workers,
@@ -46,35 +52,31 @@ def get_train_loader(
 
     else:
         train_loader = DataLoader(
-            PretrainingDataset(cfg.subjects, data_dir),
+            PretrainingDataset(
+                subjects=cfg.subjects, 
+                data_dir=data_dir
+            ),
             batch_size=cfg.batch_size,
             shuffle=True,
             num_workers=cfg.num_workers,
             pin_memory=True,
             drop_last=False,
         )
-        val_loader = None
+        valid_loader = None
 
-    return train_loader, val_loader
+    return train_loader, valid_loader
 
 class PretrainingDataset(Dataset):
     
     def __init__(
         self, 
-        cfg, 
+        subjects: List[str],
+        data_dir: str 
     ):
-        self.data_dir = cfg["data_dir"]
-        subject_dirs = [
-            d for d in os.listdir(self.data_dir) 
-            if os.path.isdir(os.path.join(self.data_dir, d))
-            and 'corrupted' not in d
-        ]
-        if isinstance(cfg['subjects'], list):
-            subject_dirs = [d for d in subject_dirs if d in cfg['subjects']]
-
+        self.data_dir = data_dir
         self.data_index = []
-        for subject in subject_dirs:
-            slice_dir = f'{self.data_dir}/{subject}/Diffusion/data'
+        for subject in subjects:
+            slice_dir = f'{data_dir}/{subject}/Diffusion/data'
             slice_files = [
                 f'{subject}/Diffusion/data/{f}' for f in os.listdir(slice_dir) 
                 if os.path.isfile(os.path.join(slice_dir, f))

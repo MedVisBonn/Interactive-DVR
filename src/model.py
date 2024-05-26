@@ -10,7 +10,7 @@ def get_model(
     model = DualBranchAE(
         encoder=cfg.model.encoder,
         decoder=cfg.model.decoder,
-        in_size=cfg.model.in_size,
+        in_size=cfg.model.spatial_dim,
     )
     
     return model

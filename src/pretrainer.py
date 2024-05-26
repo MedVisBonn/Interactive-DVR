@@ -5,49 +5,69 @@ import torch.nn as nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.nn.utils import clip_grad_norm_
 from typing import Dict, Iterable, Callable, Generator, Union
+from omegaconf import OmegaConf
 
 
 from utils import *
+from losses import MSELoss
+
+
+
+def get_pretrainer(
+    cfg: OmegaConf,
+    model: nn.Module,
+    train_loader: torch.utils.data.DataLoader,
+    valid_loader: Union[torch.utils.data.DataLoader, None],
+):
+    trainer = PreTrainer(
+        cfg=cfg,
+        model=model,
+        criterion=MSELoss(),
+        train_loader=train_loader,
+        valid_loader=valid_loader,
+        eval_metrics=None
+    )
+
+    return trainer
+    
 
 
 class PreTrainer():
     def __init__(
         self, 
+        cfg,
         model, 
         criterion, 
         train_loader, 
-        cfg,
         valid_loader=None, 
         eval_metrics=None, 
-        lr=5e-4, 
-        patience=5, 
-        es_mode='min', 
-        description='untitled', 
-        n_epochs=10000, 
-        log=False, 
-        device="cuda"
+        # lr=5e-4, 
+        # patience=5, 
+        # es_mode='min', 
+        # description=', 
+        # n_epochs=10000, 
+        # log=False, 
+        # device="cuda"
     ):
-        
-        self.device = device # torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.description = description
         self.cfg = cfg
-        self.n_epochs = n_epochs
-        
+        self.log = cfg['log']
+        self.device = cfg['rank'] # torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.description = cfg['name']
+        self.n_epochs = cfg['n_epochs']
         self.model  = model.to(self.device)
-
         self.criterion = criterion
         self.train_loader = train_loader
-        self.train_loader.dataset.set_modality('reconstruction')
+        # self.train_loader.dataset.set_modality('reconstruction')
         self.valid_loader = train_loader if valid_loader is None else valid_loader
-        self.valid_loader.dataset.set_modality('reconstruction')
-        self.lr = lr
-        self.patience = patience
+        # self.valid_loader.dataset.set_modality('reconstruction')
+        self.lr = cfg['lr']
+        self.patience = cfg['patience']
         self.eval_metrics = eval_metrics
-        self.es_mode = es_mode
+        self.es_mode = cfg['es_mode']
         #self.optimizer = torch.optim.Adam([param for name, param in model.named_parameters() if not all([s in name for s in ['layer', 'pre_conv']])], lr=lr)
         self.optimizer = torch.optim.Adam([
-            {'params': self.model.encoder.parameters(), 'lr': lr},
-            {'params': self.model.decoder.parameters(), 'lr': lr, 'weight_decay': 0}])
+            {'params': self.model.encoder.parameters(), 'lr': self.lr},
+            {'params': self.model.decoder.parameters(), 'lr': self.lr, 'weight_decay': 0}])
 
         self.scheduler = ReduceLROnPlateau(self.optimizer, 'min', patience=self.patience)
         self.es = EarlyStopping(mode=self.es_mode, patience=2*self.patience)
@@ -56,9 +76,15 @@ class PreTrainer():
             self.history = {**self.history, **{key: [] for key in self.eval_metrics.keys()}}
         self.training_time = 0
         
-        self.log = log
         if self.log:
-            run = wandb.init(reinit=True, name='log_' + self.description, project=cfg['project'])
+            run = wandb.init(
+                reinit=True, 
+                name='log_' + self.description, 
+                project=cfg['wandb']['project'],
+                config = OmegaConf.to_container(
+                    cfg, resolve=True, throw_on_missing=True
+                )
+            )
             #wandb.watch(self.model, log='all', log_freq=1)
         
     def inference_step(self, x):
@@ -151,6 +177,7 @@ class PreTrainer():
             loss_list.append(loss.item())
             batch_sizes.append(target.shape[0])
             if self.eval_metrics is not None:
+                raise NotImplementedError
                 for key, metric in self.eval_metrics.items():
                     epoch_metrics[key].append(metric(torch.atleast_2d(net_out),target,weight).item())
         average_loss = epoch_average(loss_list, batch_sizes)
