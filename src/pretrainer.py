@@ -6,6 +6,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.nn.utils import clip_grad_norm_
 from typing import Dict, Iterable, Callable, Generator, Union
 from omegaconf import OmegaConf
+from omegaconf.listconfig import ListConfig
 
 
 from utils import *
@@ -50,9 +51,18 @@ class PreTrainer():
         # device="cuda"
     ):
         self.cfg = cfg
+        self.root_dir = cfg['root_dir']
         self.log = cfg['log']
         self.device = cfg['rank'] # torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.description = cfg['name']
+        self.description = cfg.name
+        # print(cfg['subjects'], type(cfg['subjects']), len(cfg['subjects']))
+        if cfg['subjects'] == 'all':
+            self.description += '_all'
+        
+        elif isinstance(cfg['subjects'], ListConfig) and len(cfg['subjects']) == 1:
+            self.description += f"_{cfg['subjects'][0]}"
+        else:
+            raise ValueError('Invalid subjects configuration for naming')
         self.n_epochs = cfg['n_epochs']
         self.model  = model.to(self.device)
         self.criterion = criterion
@@ -71,7 +81,7 @@ class PreTrainer():
 
         self.scheduler = ReduceLROnPlateau(self.optimizer, 'min', patience=self.patience)
         self.es = EarlyStopping(mode=self.es_mode, patience=2*self.patience)
-        self.history = {'train loss': [], 'valid loss' : [], 'rf scores': []}
+        self.history = {'train loss': [], 'valid loss' : []}
         if self.eval_metrics is not None:
             self.history = {**self.history, **{key: [] for key in self.eval_metrics.keys()}}
         self.training_time = 0
@@ -79,30 +89,32 @@ class PreTrainer():
         if self.log:
             run = wandb.init(
                 reinit=True, 
-                name='log_' + self.description, 
+                name=self.description, 
                 project=cfg['wandb']['project'],
-                config = OmegaConf.to_container(
-                    cfg, resolve=True, throw_on_missing=True
+                config=OmegaConf.to_container(
+                    cfg, 
+                    resolve=True, 
+                    throw_on_missing=True
                 )
             )
-            #wandb.watch(self.model, log='all', log_freq=1)
+            wandb.watch(self.model, log='all', log_freq=1)
         
     def inference_step(self, x):
         return self.model(x)
     
     def save_hist(self):
-        if(not os.path.exists("trainer_logs")):
-            os.makedirs("trainer_logs")
-        savepath = f"trainer_logs/{self.description}.npy"
+        if(not os.path.exists(f"{self.root_dir}/trainer_logs")):
+            os.makedirs(f"{self.root_dir}/trainer_logs")
+        savepath = f"{self.root_dir}/trainer_logs/{self.description}.npy"
         np.save(savepath, self.history)
         return
     
     def save_model(self):
-        if(not os.path.exists("models")):
-            os.makedirs("models")
-        if(not os.path.exists("trainer_logs")):
-            os.makedirs("trainer_logs")
-        savepath = f"models/{self.description}_best.pt"
+        if(not os.path.exists(f"{self.root_dir}/models")):
+            os.makedirs(f"{self.root_dir}/models")
+        if(not os.path.exists(f"{self.root_dir}/trainer_logs")):
+            os.makedirs(f"{self.root_dir}/trainer_logs")
+        savepath = f"{self.root_dir}/models/{self.description}_best.pt"
         torch.save({
         'model_dict': self.model.state_dict(),
         'optimizer_state_dict': self.optimizer.state_dict(),
@@ -111,29 +123,28 @@ class PreTrainer():
         return
     
     def load_model(self):
-        savepath = f"models/{self.description}_best.pt"
+        savepath = f"{self.root_dir}/models/{self.description}_best.pt"
         checkpoint = torch.load(savepath)
         self.model.load_state_dict(checkpoint['model_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        savepath = f"trainer_logs/{self.description}.npy"
+        savepath = f"{self.root_dir}/trainer_logs/{self.description}.npy"
         self.history = np.load(savepath,allow_pickle='TRUE').item()
         return
     
     def train_epoch(self):
         loss_list, batch_sizes = [], []
         for batch in self.train_loader:
-            input_ = batch['input']#.to(self.device)
-            target = batch['target']#.to(self.device)
-            mask   = batch['mask']#.to(self.device)
+            input_  = batch['input'].to(self.device)
+            mask    = batch['mask'].to(self.device)
             net_out = self.inference_step(input_)
             
-            loss = self.criterion(net_out, target, mask.unsqueeze(1))
+            loss = self.criterion(net_out, input_.detach(), mask.unsqueeze(1))
             self.optimizer.zero_grad()
             loss.backward()
             clip_grad_norm_(self.model.parameters(), 0.5)
             self.optimizer.step()
             loss_list.append(loss.item())
-            batch_sizes.append(target.shape[0])
+            batch_sizes.append(input_.shape[0])
         average_loss = epoch_average(loss_list, batch_sizes)
         self.history['train loss'].append(average_loss)
         
@@ -168,19 +179,24 @@ class PreTrainer():
             epoch_metrics = {key: [] for key in self.eval_metrics.keys()}
 
         for batch in self.valid_loader:
-            input_ = batch['input']#.to(self.device)
-            target = batch['target']#.to(self.device)
-            mask   = batch['mask']#.to(self.device)
+            input_ = batch['input'].to(self.device)
+            # target = batch['input']#.to(self.device)
+            mask   = batch['mask'].to(self.device)
             net_out = self.inference_step(input_)
-            loss = self.criterion(net_out, target, mask.unsqueeze(1))
+            loss = self.criterion(net_out, input_.detach(), mask.unsqueeze(1))
             
             loss_list.append(loss.item())
-            batch_sizes.append(target.shape[0])
+            batch_sizes.append(input_.shape[0])
             if self.eval_metrics is not None:
                 raise NotImplementedError
                 for key, metric in self.eval_metrics.items():
                     epoch_metrics[key].append(metric(torch.atleast_2d(net_out),target,weight).item())
         average_loss = epoch_average(loss_list, batch_sizes)
+
+        if self.log:
+            wandb.log({
+                'valid_loss': average_loss
+            }, commit=True)
         self.history['valid loss'].append(average_loss)
         if self.eval_metrics is not None:
             for key, epoch_scores in epoch_metrics.items():
@@ -207,7 +223,6 @@ class PreTrainer():
             # self.history['rf scores'].append(scores['Avg_f1_tracts'])
             # if self.log:
             #     wandb.log({'metrics': scores})
-            
             epoch_summary = [f"Epoch {epoch+1}"] + [f" - {key}: {self.history[key][-1]:.4f} |" for key in self.history] + [ f"ES epochs: {self.es.num_bad_epochs}"]
             progress_bar.set_description("".join(epoch_summary))
             es_metric = list(self.history.values())[1][-1]
@@ -227,6 +242,7 @@ class PreTrainer():
             #    break
                 
         self.training_time = time() - self.training_time
+        print(f"Training time: {self.training_time / 60:.2f} minutes")
         self.save_hist()
         self.load_model()
         

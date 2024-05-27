@@ -74,23 +74,37 @@ class PretrainingDataset(Dataset):
         data_dir: str 
     ):
         self.data_dir = data_dir
-        self.data_index = []
+        self.slice_index = []
+        self.mask_index = []
         for subject in subjects:
-            slice_dir = f'{data_dir}/{subject}/Diffusion/data'
+            subject_dir = f'{data_dir}/{subject}/Diffusion/data'
             slice_files = [
-                f'{subject}/Diffusion/data/{f}' for f in os.listdir(slice_dir) 
-                if os.path.isfile(os.path.join(slice_dir, f))
+                f'{subject}/Diffusion/data/{f}' for f in os.listdir(subject_dir) 
+                if os.path.isfile(os.path.join(subject_dir, f))
             ]
-            self.data_index += slice_files
+            self.slice_index += slice_files
+
+            mask_files = [
+                f'{subject}/Diffusion/brain_mask/{f}' for f in os.listdir(subject_dir)
+                if os.path.isfile(os.path.join(subject_dir, f))
+            ]
+            self.mask_index += mask_files
 
     def __len__(self):
-        return len(self.data_index)
+        return len(self.slice_index)
     
     def __getitem__(self, idx):
-        file_name = f'{self.data_dir}/{self.data_index[idx]}'
-        data = torch.tensor(nib.load(file_name).get_fdata()).float()
+        slice_path = f'{self.data_dir}/{self.slice_index[idx]}'
+        slice = torch.tensor(nib.load(slice_path).get_fdata()).float()
 
-        return data
+        mask_path = f'{self.data_dir}/{self.mask_index[idx]}'
+        mask = torch.tensor(nib.load(mask_path).get_fdata()).long()
+
+
+        return {
+            'input': slice,
+            'mask': mask
+        }
 
 
 class AEDataset(Dataset):

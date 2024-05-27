@@ -1,0 +1,28 @@
+# wandb
+wandb:
+  project: 'VCBM24'
+name: 'unsupervised'
+log: True
+rank: 0
+root_dir: '../..'
+
+# DATA
+data_dir: '../../../../../data/hcp'
+subjects: 'all' #[599469]
+to_gpu: False
+normalize: True
+
+# MODEL
+model: 
+  arch: 'ae'
+  encoder: 'zero'
+  decoder: 'reconstruction'
+  spatial_dim: 145
+
+# TRAINING
+n_epochs: 20
+batch_size: 16  # default: 8
+lr: 5e-4  # 1e-4, 1e-5
+patience: 5
+es_mode: 'min'
+num_workers: 4

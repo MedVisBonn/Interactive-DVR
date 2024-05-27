@@ -2,18 +2,22 @@
 experiments/*
 resources/*
 trained_models/*
+models/*
+trainer_logs/*
 data/*
 
-src/wandb/*
+**/wandb/*
+**/outputs/*
+
 src/sandbox/*
 src/trainer_logs/*
 src/models/*
 src/tmp/*
 src/old/*
-src/apps/*
+# src/apps/*
 src/studies/*
 src/experiments/*
-src/configs/*
+# src/configs/*
 
 
 # files
