@@ -192,7 +192,7 @@ class UserModel:
         samples = torch.zeros_like(slc)
 
         #weights = torch.any(torch.abs(slc).type(torch.uint8), axis=0) * ground_truth_slice # 5 x 145 x 145 , alte Version
-        weights = torch.abs(slc).max(dim=0).values * ground_truth_slice # 5 x 145 x 145 , neue Version
+        weights = torch.abs(slc).max(dim=0).values.repeat(7, 1, 1) # 5 x 145 x 145 , neue Version
 
         # print(weights.shape, (weights>0).sum(axis=(1,2)))
         weights = weights / (weights>0).sum(axis=(1,2)).reshape(-1,1,1)
@@ -220,25 +220,49 @@ class UserModel:
 
     def sample_random_candidate_voxels(self, slc: Tensor, ground_truth_slice: Tensor, 
                                      n_samples, seed=None) -> Tensor:
+        """ samples random available voxels from the slice
 
-        # seed if specified
-        #if seed is not None:
-        #    torch.manual_seed(seed)
+        Parameters
+        ----------
+        slc : Tensor
+            slice indicating available voxels, shape n_classes x W x H
+            shape includes n_classes for compatibility with sample_candidate_voxels function
+        
+        ground_truth_slice : Tensor
+            ground truth slice, shape n_classes x W x H
+        
+        n_samples : int
+            number of samples per slice before brushing
+        
+        seed : int
+            If not None (default), set specified seed
+            before sampling.
+        
+        Returns
+        -------
+        samples : Tensor
+            mask with samples for specified slice and all classes,
+            shape n_classes x W x H
+        """
+        if seed is not None:
+            random.seed(seed)
 
-        # init sampler and output tensor	
-        sampler = torch.utils.data.WeightedRandomSampler
+
         samples = torch.zeros_like(slc)
 
-        weights = torch.any(torch.abs(slc).type(torch.uint8), axis=0) # 145 x 145
-        weights = weights / (weights>0).sum(axis=(0,1))
+        indices = np.argwhere(slc[0] == 1)
 
-        num_samples = int(min((weights > 0).sum(), n_samples))
+        x = len(indices[0])
+        if len(indices[0]) <= n_samples:
+            selected_indices = indices
+        else:
+            ind = random.sample(range(x), n_samples)
+            ind1 = indices[0,ind]
+            ind2 = indices[1,ind]
 
-        index_list = list(sampler(weights.flatten(), num_samples=num_samples, replacement=False))
-        index_coords = np.unravel_index(index_list, weights.shape)
+            selected_indices = torch.from_numpy(np.hstack((ind1.reshape(-1,1), ind2.reshape(-1,1))).T)
 
-        samples[:, *index_coords] = ground_truth_slice[:, *index_coords]
-
+        samples[:, *selected_indices] = ground_truth_slice[:, *selected_indices]
         return samples # has to have shape [5, 145, 145]
 
 
@@ -562,7 +586,7 @@ class UserModel:
     	
         annotated_voxels = torch.any(annotation_mask, axis=0)
         brain_not_annoated_mask = brain_mask & ~annotated_voxels
-        x = torch.zeros((5,145,145,145))
+        x = torch.zeros((n_classes,145,145,145))
         x[:, brain_not_annoated_mask] = 1     # 5, 145, 145, 145
         random_mask = torch.zeros((145,145,145))
         random_mask[brain_not_annoated_mask] = 1   # 145, 145, 145
@@ -621,12 +645,30 @@ class UserModel:
                 selection[ax + 1] = slc
                 random_selection = x[selection]
                 t_selection = self.gt[selection]
-
                 samples = self.sample_random_candidate_voxels(random_selection, t_selection, n_samples, seed=seed)
                 brushed_mask = self._slice_add_neighbors(samples, t_selection)
                 interaction_map[selection] = torch.bitwise_or(interaction_map[selection], brushed_mask)
                 
         return interaction_map.float() # , selection
+    
+    def totaly_random_refinement_annotation(self, prediction: Tensor, annotation_mask: Tensor,
+                                          brain_mask: Tensor, 
+                              n_samples: int, mode: int = 'single_slice', 
+                              pos_weight: float = 1, seed: int = 42) -> Tensor:
+
+        n_classes = prediction.shape[0]
+        annotated_voxels = torch.any(annotation_mask, axis=0)
+        brain_not_annoated_mask = brain_mask & ~annotated_voxels
+        interaction_map = torch.zeros_like(self.gt, dtype=torch.int64)
+        
+        valid_indices = torch.argwhere(brain_not_annoated_mask)
+        random_indices = random.sample(range(valid_indices.shape[0]), n_samples * n_classes)
+
+        selected_indices = valid_indices[random_indices]
+        interaction_map[:, selected_indices[:,0], selected_indices[:,1], selected_indices[:,2]] = self.gt[:, selected_indices[:,0], selected_indices[:,1], selected_indices[:,2]].long()
+
+        return interaction_map.float()
+         # , selection
          
 
 # class UserModel:
