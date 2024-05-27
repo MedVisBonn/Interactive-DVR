@@ -6,6 +6,7 @@ from torchvision import transforms
 import nibabel as nib
 import nrrd
 import random
+import os
 
 from user_model import UserModel
 from utils import *
@@ -191,7 +192,7 @@ class AEDataset(Dataset):
                                                       seed=seed
         )
 
-    def refinement_annotation(self, prediction, uncertainty_map=None, random=False, seed=42) -> Tensor:
+    def refinement_annotation(self, prediction, uncertainty_map=None, random=False, totaly_random=False, seed=42) -> Tensor:
         
         if self.init == 'per_class':
             mode = 'per_class'
@@ -206,6 +207,15 @@ class AEDataset(Dataset):
                                                           self.cfg["refinement_voxels"],
                                                           mode=mode,
                                                           seed=seed
+            )
+        
+        elif totaly_random:
+            return self.user.totaly_random_refinement_annotation(prediction, 
+                                                                self.annotations.detach().cpu(),
+                                                                self.brain_mask.detach().cpu(),
+                                                                self.cfg["refinement_voxels"],
+                                                                mode=mode,
+                                                                seed=seed
             )
 
         else:
