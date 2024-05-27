@@ -17,7 +17,7 @@ from time import time
 from typing import List, Dict, Iterable, Callable, Generator, Union
 #import wandb
 from sklearn.ensemble import RandomForestClassifier, IsolationForest
-from sklearn.metrics import precision_recall_fscore_support
+from sklearn.metrics import precision_recall_fscore_support, roc_curve, auc
 from sklearn.decomposition import PCA
 from scipy.ndimage import distance_transform_edt
 import random
@@ -421,8 +421,9 @@ def evaluate_RF(dataset: Dataset, features: Tensor, cfg: Dict[str, str], uncerta
     # predict labels in test mask
     predicted_prob    = clf.predict_proba(X_test)
     Y_predicted_prob  = torch.tensor(np.array([p[:, 1] for p in predicted_prob])).T
+    n_classes = len(cfg['labels'])
     if tta:
-        Y_predicted_prob = Y_predicted_prob.reshape((len(features), 844350, 5)).mean(axis=0)
+        Y_predicted_prob = Y_predicted_prob.reshape((len(features), 844350, n_classes)).mean(axis=0)
     Y_predicted_label = (Y_predicted_prob > 0.5)*1
 
 
@@ -430,7 +431,6 @@ def evaluate_RF(dataset: Dataset, features: Tensor, cfg: Dict[str, str], uncerta
                 ####### Save Prediction #######
                 ###############################
                 
-    n_classes = len(cfg['labels'])
     prediction = torch.zeros((145,145,145, n_classes))
     prediction.view(-1, n_classes)[test_mask.reshape(-1)  == 1] = Y_predicted_label.float()
 
@@ -457,6 +457,8 @@ def evaluate_RF(dataset: Dataset, features: Tensor, cfg: Dict[str, str], uncerta
             case 'ground-truth':
                 continue
             case 'random':
+                break
+            case 'totaly-random':
                 break
             case 'entropy':
                 uncertainty_map, uncertainty_per_class = uncertainty_entropy(Y_predicted_prob, n_classes, test_mask)
@@ -594,3 +596,17 @@ def eval_pca(dataset: Dataset, cfg: str, n_components: Iterable = np.arange(0, 5
         scores_list.append(scores)
         
     return np.cumsum(explained_variance_ratio), scores_list
+
+
+def calc_ROC(error_map, uncertainty_map, brain_mask, per_class=True):
+    if per_class:
+        roc_values = []
+        for i in range(error_map.shape[0]):
+            fpr, tpr, _ = roc_curve(y_true=error_map[i][brain_mask].flatten(), y_score=uncertainty_map[i][brain_mask].flatten())
+            auc_value = auc(fpr, tpr)
+            roc_values.append((fpr, tpr, auc_value))
+        return roc_values
+    else:
+        fpr, tpr, _ = roc_curve(error_map[brain_mask].flatten(), uncertainty_map[brain_mask].flatten())
+        auc_value = auc(fpr, tpr)
+        return fpr, tpr, auc_value
