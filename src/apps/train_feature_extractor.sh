@@ -1,14 +1,11 @@
 
 #!/bin/bash
 
-# DEBUG=false
-
+# General
 NAME='ae_feature-extractor'
 LOG=true
 CUDA_DEVICE=5
 TRAIN=true
-# SUBJECTS=[599469]
-
 
 # Model
 ENCODER='zero'
@@ -22,6 +19,6 @@ if [ "$TRAIN" = true ]; then
         ++name=$NAME \
         ++log="$LOG" \
         ++model.encoder="$ENCODER" \
-        ++N_EPOCHS="$N_EPOCHS" \
-        ++PATIENCE="$PATIENCE"
+        ++n_epochs="$N_EPOCHS" \
+        ++patience="$PATIENCE"
 fi

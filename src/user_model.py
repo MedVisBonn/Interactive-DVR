@@ -8,7 +8,12 @@ import random
 
 class UserModel:
     
-    def __init__(self, ground_truth: Tensor, cfg: dict, brush_sizes=torch.arange(2,7)):
+    def __init__(
+        self, 
+        ground_truth: Tensor, 
+        cfg: dict, 
+        brush_sizes=torch.arange(2,7)
+    ):
         super().__init__()
         
         # globals
@@ -39,7 +44,10 @@ class UserModel:
         self.annotated_slices = None
         
     
-    def _sum_l1_per_slice(self, volume: Tensor) -> Tensor:
+    def _sum_l1_per_slice(
+        self, 
+        volume: Tensor
+    ) -> Tensor:
         """ Find sum over all slices in each direction
 
         Parameters
@@ -72,7 +80,10 @@ class UserModel:
         
         
 
-    def _order_slices_by_sum(self, slice_sums: Tensor) -> Union[np.array, np.array]:
+    def _order_slices_by_sum(
+        self, 
+        slice_sums: Tensor
+    ) -> Union[np.array, np.array]:
         """ Order slices by their overall sum
         Note: numpy dependent, because np.unravel_index exists
 
@@ -103,8 +114,12 @@ class UserModel:
         return axis, slices
 
 
-    def _slice_samples_per_class(self, slc: Tensor, inverse_frequencies: Tensor,
-                                 n: int) -> Tensor:
+    def _slice_samples_per_class(
+        self, 
+        slc: Tensor, 
+        inverse_frequencies: Tensor,
+        n: int
+    ) -> Tensor:
         """ samples seeds for each class in a slice from the
             error map, weighted by inverse class frequencies
 
@@ -156,8 +171,12 @@ class UserModel:
         return n_samples
 
 
-    def _sample_candidate_voxels(self, slc: Tensor, ground_truth_slice: Tensor, 
-                                 n_class_samples: Tensor, seed=None) -> Tensor:
+    def _sample_candidate_voxels(
+        self, slc: Tensor, 
+        ground_truth_slice: Tensor, 
+        n_class_samples: Tensor, 
+        seed=None
+    ) -> Tensor:
         """ individually sample voxels for each class with samples sizes
             potentially varying among them.
 
@@ -218,8 +237,13 @@ class UserModel:
 
         return samples
 
-    def sample_random_candidate_voxels(self, slc: Tensor, ground_truth_slice: Tensor, 
-                                     n_samples, seed=None) -> Tensor:
+    def sample_random_candidate_voxels(
+        self, 
+        slc: Tensor, 
+        ground_truth_slice: Tensor, 
+        n_samples, 
+        seed=None
+    ) -> Tensor:
 
         # seed if specified
         #if seed is not None:
@@ -275,8 +299,15 @@ class UserModel:
         
         return interaction_mask
 
+
     
-    def initial_annotation(self, n_samples: int, init: str = 'three_slices', pos_weight: float = 1, seed: int = 42) -> Tensor:        
+    def initial_annotation(
+        self, 
+        n_samples: int, 
+        init: str = 'three_slices', 
+        pos_weight: float = 1, 
+        seed: int = 42
+    ) -> Tensor:        
         """ creates the initial annotations. For each direction (saggital, coronal,
             axial), select the slice with the most foreground labels (3 in total).
             (2) For each slice, sample n_samples many seeding points and
@@ -392,10 +423,16 @@ class UserModel:
         return interaction_map.float()
         
             
-    def refinement_annotation(self, prediction: Tensor, annotation_mask: Tensor, 
-                              uncertainty_map: Tensor,
-                              n_samples: int, mode: int = 'single_slice', 
-                              pos_weight: float = 1, seed: int = 42) -> Tensor:
+    def refinement_annotation(
+        self,
+        prediction: Tensor, 
+        annotation_mask: Tensor, 
+        uncertainty_map: Tensor,
+        n_samples: int, 
+        mode: int = 'single_slice', 
+        pos_weight: float = 1, 
+        seed: int = 42
+    ) -> Tensor:
         """ Finds the slice with the worst prediction across all three axis and 
             annotates parts of it. The annotation happens in multiple steps:
             (1) mask all voxels that are already annotated with annotation_mask
@@ -520,10 +557,16 @@ class UserModel:
         return interaction_map.float() # , selection
     
     
-    def random_refinement_annotation(self, prediction: Tensor, annotation_mask: Tensor,
-                                          brain_mask: Tensor, 
-                              n_samples: int, mode: int = 'single_slice', 
-                              pos_weight: float = 1, seed: int = 42) -> Tensor:
+    def random_refinement_annotation(
+        self, 
+        prediction: Tensor, 
+        annotation_mask: Tensor,
+        brain_mask: Tensor, 
+        n_samples: int, 
+        mode: int = 'single_slice', 
+        pos_weight: float = 1, 
+        seed: int = 42
+    ) -> Tensor:
         """ Finds the slice with the highest uncertainty across all three axis and 
             annotates parts of it. The annotation happens in multiple steps:
             (1) mask all voxels that are already annotated with annotation_mask
@@ -627,7 +670,22 @@ class UserModel:
                 interaction_map[selection] = torch.bitwise_or(interaction_map[selection], brushed_mask)
                 
         return interaction_map.float() # , selection
-         
+
+
+
+    def novelty_refinement_annotation(
+        self,
+        annotation_mask: Tensor, 
+        novelty_map: Tensor,
+        n_samples: int, 
+        mode: int = 'single_slice', 
+        pos_weight: float = 1, 
+        seed: int = 42
+    ):
+        
+        pass
+        # return interaction_map.float()
+
 
 # class UserModel:
     
