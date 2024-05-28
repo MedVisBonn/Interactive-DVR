@@ -232,7 +232,7 @@ class UserModel:
                 index_coords = np.unravel_index(index_list, weight.shape)
                 # apply mask via coordinates to samples for class i
                 #samples[i][index_coords] = 1   # alte Version, annotiert nur aktuell betrachtete Klasse
-                samples[:, *index_coords] = ground_truth_slice[:, *index_coords]
+                samples[:, index_coords] = ground_truth_slice[:, index_coords]
                 #print(index_coords)
 
         return samples
@@ -261,7 +261,7 @@ class UserModel:
         index_list = list(sampler(weights.flatten(), num_samples=num_samples, replacement=False))
         index_coords = np.unravel_index(index_list, weights.shape)
 
-        samples[:, *index_coords] = ground_truth_slice[:, *index_coords]
+        samples[:, index_coords] = ground_truth_slice[:, index_coords]
 
         return samples # has to have shape [5, 145, 145]
 

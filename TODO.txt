@@ -1,2 +1,11 @@
-* refactor modality to target
-* forward "step" to logging
+TODO:
+
+Setup Golo:
+    account venusberg
+    second docker container
+
+Sanity Checks:
+    changes to usermodel
+
+Ideas
+    TTA average before passing to DF
