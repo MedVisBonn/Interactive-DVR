@@ -107,6 +107,278 @@ class PretrainingDataset(Dataset):
         }
 
 
+class EvalDataset(Dataset):
+    
+    def __init__(
+        self,
+        subject_id: str,
+        cfg, 
+        modality='reconstruction', 
+        mode='train', 
+        to_gpu=True, 
+        init='three_slices', 
+    ):
+        super().__init__()
+        self.cfg          = OmegaConf.to_container(cfg)
+        self.axis         = cfg.data.axis
+        self.labels       = cfg.data.labels
+        self.device       = cfg.rank
+        self.modality     = modality
+        self.mode         = mode
+        self.to_gpu       = to_gpu
+        self.init         = init
+
+        self.data_path = os.path.join(
+            cfg.data.data_dir, 
+            str(subject_id), 
+            "Diffusion", 
+            "data.nii.gz"
+        )
+        self.data_in = torch.tensor(nib.load(self.data_path).get_fdata()).float()
+
+        self.mask_path = os.path.join(
+            cfg.data.data_dir, 
+            str(subject_id), 
+            "Diffusion", 
+            "nodif_brain_mask.nii.gz"
+        )
+        self.brain_mask = torch.tensor(
+            nib.load(self.mask_path).get_fdata(), dtype=torch.bool)
+        
+        self.tract_path = os.path.join(
+            cfg.data.data_dir, 
+            str(subject_id), 
+            "tracts_masks"
+        )
+        self.get_tract_masks(self.labels)
+
+        if self.axis == 'coronal':
+            self.data_in = self.data_in.permute(1,3,2,0).rot90(2, dims=[1,2])[14:159]
+            self.brain_mask = self.brain_mask.permute(1,2,0).rot90(2, dims=[1,2])[14:159]
+            self.label = self.label.permute(0,2,3,1).rot90(2, dims=[2,3])[:,14:159]
+        else:
+            raise NotImplementedError("Only coronal axis is supported at the moment")
+
+        # if cfg['log']:
+        #    wandb.config.update({'labels': cfg['labels']})
+            
+        self.user = UserModel(self.label, cfg)
+            
+        # [classes, B, H, W]
+        self.annotations = None
+
+        # [B, 1, H, W]
+        self.weight = None
+
+        self.pos_weight = (
+            len(self.labels)*self.brain_mask.sum() - \
+            self.label.sum((1,2,3))[None, :, None, None]
+        ) / self.label.sum((1,2,3))[None, :, None, None]
+        
+        if self.to_gpu:
+            self.data_in    = self.data_in.to(self.device)
+            self.label      = self.label.to(self.device)
+            self.brain_mask = self.brain_mask.to(self.device) 
+            self.pos_weight = self.pos_weight.to(self.device) 
+
+
+    def get_tract_masks(
+        self,
+        labels: List[str]
+    ) -> Tensor:
+        self.label = None
+        for tract in self.labels:
+            
+            if f'{tract}.nii.gz' in os.listdir(self.tract_path):
+                tract_mask = torch.tensor(
+                    nib.load(os.path.join(self.tract_path, f'{tract}.nii.gz')).get_fdata()
+                ).long()
+                if self.label is None:
+                    self.label = tract_mask.unsqueeze(0)
+                else:
+                    self.label = torch.cat([
+                        self.label, 
+                        tract_mask.unsqueeze(0)
+                    ], dim=0)
+
+            # class other is handled below
+            elif tract == 'Other':
+                continue
+            else:
+                # left and right are different classes but the raw data makes
+                # even more distictions we don't care for
+                if 'left' in tract or 'right' in tract:
+                    tract = tract.split('.')[0]
+                    tract_parts = tract.split('_')
+                    tract, side = tract_parts[0], tract_parts[-1]
+                    # tract, side = tract.split('_')
+                else:
+                    side = ''
+                tract_files = [
+                    f for f in os.listdir(self.tract_path)
+                    if tract in f and side in f
+                ]
+
+                tract_mask = None
+                for f in tract_files:
+                    tract_mask_tmp = torch.tensor(
+                        nib.load(os.path.join(self.tract_path, f)).get_fdata()
+                    ).long()
+                    if tract_mask is None:
+                        tract_mask = tract_mask_tmp
+                    else:
+                        tract_mask = torch.bitwise_or(
+                            tract_mask, tract_mask_tmp
+                        )
+
+                if self.label is None:
+                    self.label = tract_mask.unsqueeze(0)
+                else:
+                    self.label = torch.cat([
+                        self.label, 
+                        tract_mask.unsqueeze(0)
+                    ], dim=0)
+
+
+        other = self.brain_mask * ~torch.any(self.label, dim=0)
+        self.label = torch.cat([
+            other.unsqueeze(0),
+            self.label, 
+        ], dim=0)
+           
+        
+    def set_mode(self, mode) -> None:
+        self.mode = mode
+
+
+    def set_modality(self, modality) -> None:
+        self.modality = modality     
+        
+        
+    def initial_annotation(
+        self, 
+        seed=42
+    ) -> Tensor:
+        return self.user.initial_annotation(
+            #self.label.detach().cpu(),
+            self.cfg["init_voxels"],
+            init=self.init, 
+            seed=seed
+        )
+    
+
+    def random_refinement_annotation(
+        self,
+        prediction, 
+        seed=42
+    ) -> Tensor:
+        
+        if self.init == 'per_class':
+            mode = 'per_class'
+            
+        if self.init == 'three_slices':
+            mode = 'single_slice'
+
+        return self.user.random_refinement_annotation(
+            prediction, 
+            self.annotations.detach().cpu(),
+            self.brain_mask.detach().cpu(),
+            self.cfg["refinement_voxels"],
+            mode=mode,
+            seed=seed
+        )
+
+
+    def refinement_annotation(
+        self, 
+        prediction, 
+        uncertainty_map=None, 
+        random=False, 
+        seed=42
+    ) -> Tensor:
+        
+        if self.init == 'per_class':
+            mode = 'per_class'
+            
+        if self.init == 'three_slices':
+            mode = 'single_slice'
+        
+        if random:
+            return self.user.random_refinement_annotation(
+                prediction, 
+                self.annotations.detach().cpu(),
+                self.brain_mask.detach().cpu(),
+                self.cfg["refinement_voxels"],
+                mode=mode,
+                seed=seed
+            )
+
+        else:
+            return self.user.refinement_annotation(
+                prediction,
+                #self.label.detach().cpu(),
+                self.annotations.detach().cpu(),
+                uncertainty_map,
+                self.cfg["refinement_voxels"],
+                mode=mode,
+                seed=seed
+            )
+
+
+    def update_annotation(self, annotations) -> None:
+        assert(annotations.data.type() == 'torch.FloatTensor')
+
+        if self.to_gpu:
+            annotations = annotations.to(self.device)
+
+        if self.annotations is None:
+            self.annotations = annotations
+        else:
+            self.annotations += annotations
+            self.annotations  = torch.clamp(self.annotations, 0, 1)
+            
+        self.weight = (self.annotations.sum(0) > 0).unsqueeze(1).float()
+        self.pos_weight  = (self.weight.sum() - self.annotations.sum((1,2,3))[None, :, None, None])
+#             self.pos_weight  = (1 - self.annotations.sum((1,2,3))[None, :, None, None])
+        self.pos_weight /= self.annotations.sum((1,2,3))[None, :, None, None]
+
+    
+    def clear_annotation(self) -> None:
+        self.annotations = None
+        
+
+    def __len__(self) -> int:
+        return self.data_in.shape[0]
+        
+
+    def __getitem__(self, index) -> dict:
+
+        input_ = self.data_in[index]
+
+        if self.modality == 'reconstruction':
+            target = self.data_in[index].detach().clone()
+            weight = 1.
+            
+        elif self.modality == 'segmentation':
+        
+            if self.mode == 'train':
+                target = self.annotations[:, index].detach()
+            elif self.mode == 'validate':
+                target = self.label[:, index].detach()
+    
+
+            weight = self.weight[index]
+
+        mask = self.brain_mask[index]
+        
+        return {
+            'input':  input_,
+            'target': target,
+            'weight': weight, # may needs unsqueeze(0) in validate
+            'mask':   mask
+        }
+    
+
 class AEDataset(Dataset):
     
     def __init__(self, cfg, modality='reconstruction', mode='train', set=1, normalize=True,
