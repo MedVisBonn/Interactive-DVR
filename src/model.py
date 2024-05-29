@@ -5,15 +5,21 @@ from layer import *
 
 
 def get_model(
-    cfg
+    cfg,
+    return_state_dict=False
 ):
     model = DualBranchAE(
         encoder=cfg.model.encoder,
         decoder=cfg.model.decoder,
         in_size=cfg.model.spatial_dim,
     )
-    
-    return model
+
+    if return_state_dict:
+        path = f'{cfg.root_dir}/models/{cfg.model.state_dict}'
+        state_dict = torch.load(path)['model_dict']
+        return model, state_dict
+    else:
+        return model
 
 class DualBranchAE(nn.Module):
     def __init__(
