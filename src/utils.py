@@ -16,9 +16,10 @@ from pathlib import Path
 from time import time
 from typing import List, Dict, Iterable, Callable, Generator, Union
 import wandb
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, IsolationForest
 from sklearn.metrics import precision_recall_fscore_support
 from sklearn.decomposition import PCA
+from scipy.ndimage import distance_transform_edt
 import random
 import copy
 from datetime import date
@@ -307,9 +308,78 @@ class FeatureExtractor(nn.Module):
         return self._features
 
 
+### Uncertainty measures
+def calc_binary_entropy(prob):
+    eps = 1e-5
+    
+    #Edge Cases
+    prob = torch.clamp(prob, eps, 1-eps)
+    
+    return -(prob*torch.log2(prob) + (1-prob)*torch.log2(1-prob))
 
-def evaluate_RF(dataset: Dataset, features: Tensor, cfg: Dict[str, str]) \
-                -> Union[Dict[str, float], Tensor]:
+
+def uncertainty_entropy(Y_predicted_prob, n_classes, test_mask):
+    
+    entropy = calc_binary_entropy(Y_predicted_prob)
+    entropy_map = torch.zeros((145,145,145, n_classes))
+    entropy_map[test_mask  == 1] = entropy.float()
+    mean_entropy_map = entropy_map.mean(axis=-1)
+    return mean_entropy_map, entropy_map
+
+
+def uncertainty_sd(train_label, test_mask, n_classes):
+
+    train_label_tensor = torch.from_numpy(train_label)
+    annotated_voxels = torch.any(train_label_tensor, dim=-1)
+    # per class
+    sd_map_per_class = torch.zeros((n_classes, 145,145,145))
+    for i in range(n_classes):
+        train_label_i = train_label_tensor[:,:,:,i].bool()
+        sd = torch.tensor(distance_transform_edt(~train_label_i))
+        sd_map_per_class[i, test_mask == 1] = sd[test_mask == 1].float()  
+    sd_map_per_class[:, annotated_voxels] = 0 # all values of annotated voxels should be 0
+    # all classes
+    spatial_distance_map, _ = torch.min(sd_map_per_class, dim=0)
+    
+    return spatial_distance_map, sd_map_per_class.permute(1,2,3,0)
+
+
+def uncertainty_fd(train_label, features, test_mask, n_classes):
+    
+    train_label_tensor = torch.from_numpy(train_label)
+    annotated_voxels = torch.any(train_label_tensor, dim=-1)
+    brain_mask_tensor = torch.from_numpy(test_mask == 1)
+    
+    def compute_anomaly_scores(annotated_features, mask):
+        iforest = IsolationForest(n_estimators=100, random_state=0, n_jobs=-1).fit(annotated_features)
+        anomaly_scores = iforest.decision_function(features[mask].reshape(-1, 44))
+        return torch.from_numpy(1 - (anomaly_scores + 0.5)).float()
+    
+    # all classes
+    annotated_features = features[annotated_voxels].reshape(-1, 44)
+    brain_na_mask = brain_mask_tensor & ~annotated_voxels
+    anomaly_scores_map = torch.zeros((145,145,145))
+    anomaly_scores_map[brain_na_mask] = compute_anomaly_scores(annotated_features, brain_na_mask)
+
+    # per class
+    fd_map_per_class = torch.zeros((n_classes, 145,145,145))
+    for i in range(n_classes):
+        train_label_i = train_label_tensor[:,:,:,i].bool()
+        annotated_features = features[train_label_i].reshape(-1, 44)
+        brain_na_mask = brain_mask_tensor & ~train_label_i
+        fd_map_per_class[i, brain_na_mask == 1] = compute_anomaly_scores(annotated_features, brain_na_mask)
+    fd_map_per_class[:, annotated_voxels] = 0 # all values of annotated voxels should be 0
+
+    return anomaly_scores_map, fd_map_per_class.permute(1,2,3,0)
+
+
+def evaluate_RF(
+    dataset: Dataset, 
+    features: Tensor, 
+    cfg: Dict[str, str], 
+    uncertainty_measures: List[str], 
+    tta=False
+)-> Union[Dict[str, float], Tensor]:
 
                 ###############################
                 ##### TRAIN RANDOM FOREST #####
@@ -320,11 +390,23 @@ def evaluate_RF(dataset: Dataset, features: Tensor, cfg: Dict[str, str]) \
     train_label = dataset.annotations.detach().cpu().permute(1,2,3,0).numpy()
     test_label  = dataset.label.detach().cpu().permute(1,2,3,0).numpy()
     
-    # Input - Mask voxels that are not labelled before flattening the input
-    X_train = features.reshape((-1, features.shape[-1]))[train_mask.reshape(-1) == 1]
-    X_test  = features.reshape((-1, features.shape[-1]))[test_mask.reshape(-1)  == 1]
-    # Target - Same as above. Mask before flattening
-    Y_train = train_label.reshape((-1, train_label.shape[-1]))[train_mask.reshape(-1) == 1]
+    if tta:
+        f = np.stack(features, axis=0)  # (n_tta, 145, 145, 145, 44)
+        train_m = np.repeat(train_mask[np.newaxis, ...], len(features), axis=0)  # (n_tta, 145, 145, 145)
+        test_m = np.repeat(test_mask[np.newaxis, ...], len(features), axis=0)  # (n_tta, 145, 145, 145)
+        train_l = np.repeat(train_label[np.newaxis, ...], len(features), axis=0)  # (n_tta, 145, 145, 145, 5)
+
+        X_train = f.reshape((-1, f.shape[-1]))[train_m.reshape(-1) == 1]    # (n_tta*train_voxels, 44)
+        X_test = f.reshape((-1, f.shape[-1]))[test_m.reshape(-1) == 1]    # (n_tta*844350, 44)
+        Y_train = train_l.reshape((-1, train_l.shape[-1]))[train_m.reshape(-1) == 1]   # (n_tta*train_voxels, 5)
+    
+    else:
+        # Input - Mask voxels that are not labelled before flattening the input
+        X_train = features.reshape((-1, features.shape[-1]))[train_mask.reshape(-1) == 1]
+        X_test  = features.reshape((-1, features.shape[-1]))[test_mask.reshape(-1)  == 1]
+        # Target - Same as above. Mask before flattening
+        Y_train = train_label.reshape((-1, train_label.shape[-1]))[train_mask.reshape(-1) == 1]
+
     Y_test  = test_label.reshape((-1,  train_label.shape[-1]))[test_mask.reshape(-1)  == 1]
 
     # Init Random Forest Classifier
@@ -333,7 +415,7 @@ def evaluate_RF(dataset: Dataset, features: Tensor, cfg: Dict[str, str]) \
                          oob_score=True,
                          random_state=0,
                          n_jobs=-1,
-                         max_features="auto",
+                         max_features="sqrt", # changed from "auto" because auto got removed
                          class_weight="balanced",
                          max_depth=None,
                          min_samples_leaf=cfg["min_samples_leaf"])
@@ -342,7 +424,9 @@ def evaluate_RF(dataset: Dataset, features: Tensor, cfg: Dict[str, str]) \
     clf.fit(X_train, Y_train)
     # predict labels in test mask
     predicted_prob    = clf.predict_proba(X_test)
-    Y_predicted_prob  = torch.tensor([p[:, 1] for p in predicted_prob]).T
+    Y_predicted_prob  = torch.tensor(np.array([p[:, 1] for p in predicted_prob])).T
+    if tta:
+        Y_predicted_prob = Y_predicted_prob.reshape((len(features), 844350, 5)).mean(axis=0)
     Y_predicted_label = (Y_predicted_prob > 0.5)*1
 
 
@@ -350,7 +434,7 @@ def evaluate_RF(dataset: Dataset, features: Tensor, cfg: Dict[str, str]) \
                 ####### Save Prediction #######
                 ###############################
                 
-    n_classes = len(cfg['labels'])
+    n_classes = len(cfg['data']['labels'])
     prediction = torch.zeros((145,145,145, n_classes))
     prediction.view(-1, n_classes)[test_mask.reshape(-1)  == 1] = Y_predicted_label.float()
 
@@ -369,7 +453,30 @@ def evaluate_RF(dataset: Dataset, features: Tensor, cfg: Dict[str, str]) \
     recall    = (TP + eps) / (TPplusFN + eps)
     f1        = (2 * precision * recall + eps) / ( precision + recall  + eps)
 
-    labels = cfg["labels"]
+    uncertainty_maps = {}
+    uncertainty_per_class_maps = {}
+
+    for measure in uncertainty_measures:
+        match measure:
+            case 'ground-truth':
+                continue
+            case 'random':
+                break
+            case 'entropy':
+                uncertainty_map, uncertainty_per_class = uncertainty_entropy(Y_predicted_prob, n_classes, test_mask)
+            case 'spatial-distance':
+                uncertainty_map, uncertainty_per_class = uncertainty_sd(train_label, test_mask, n_classes)
+            case 'feature-distance':
+                uncertainty_map, uncertainty_per_class = uncertainty_fd(train_label, features, test_mask, n_classes)
+            case _:
+                raise ValueError(f"Uncertainty measure {measure} not implemented")
+
+        uncertainty_maps[measure] = uncertainty_map
+        uncertainty_per_class_maps[measure] = uncertainty_per_class.permute(3,0,1,2)
+
+    #TODO: for measure in novelty_scores:
+
+    labels = cfg['data']["labels"]
     scores = {}
     for c in range(len(labels)):
         scores[f"{labels[c]}_precision"] = precision[c].numpy()
@@ -381,101 +488,193 @@ def evaluate_RF(dataset: Dataset, features: Tensor, cfg: Dict[str, str]) \
     scores["Avg_f1_tracts"] = f1[1:].mean().numpy()
     
     
+    return scores, prediction.permute(3,0,1,2), uncertainty_maps, uncertainty_per_class_maps
 
-    return scores, prediction.permute(3,0,1,2)
 
 
-def evaluate_RF_tmp(dataset: Dataset, features: Tensor, prev_correct: Tensor,
-                    cfg: Dict[str, str]) -> Union[Dict[str, float], Tensor]:
+def eval_pca(dataset: Dataset, cfg: str, n_components: Iterable = np.arange(0, 50)) -> Union[np.array, List[dict]]:
+    
+    features_raw = dataset.input.permute(0, 2, 3, 1).flatten(start_dim=0, end_dim=2)
+    pca = PCA(n_components=None, random_state=42)
+    features_pca = pca.fit_transform(features_raw)
+    explained_variance_ratio = pca.explained_variance_ratio_
+    scores_list = []
 
-                ###############################
-                ##### TRAIN RANDOM FOREST #####
-                ###############################
+    for i in tqdm(n_components):
+        scores, preds = evaluate_RF(dataset, features_pca[:, :i+1], cfg)
+        scores_list.append(scores)
+        
+    return np.cumsum(explained_variance_ratio), scores_list
+
+
+# def evaluate_RF(dataset: Dataset, features: Tensor, cfg: Dict[str, str]) \
+#                 -> Union[Dict[str, float], Tensor]:
+
+#                 ###############################
+#                 ##### TRAIN RANDOM FOREST #####
+#                 ###############################
                 
-    train_mask  = dataset.weight.detach().cpu().squeeze().numpy()    #.permute(0,2,3,1).repeat(1,1,1,44).numpy()
-    test_mask   = dataset.brain_mask.detach().cpu().numpy()#.unsqueeze(3).repeat(1,1,1,44).numpy()
-    train_label = dataset.annotations.detach().cpu().permute(1,2,3,0).numpy()
-    test_label  = dataset.label.detach().cpu().permute(1,2,3,0).numpy()
+#     train_mask  = dataset.weight.detach().cpu().squeeze().numpy()    #.permute(0,2,3,1).repeat(1,1,1,44).numpy()
+#     test_mask   = dataset.brain_mask.detach().cpu().numpy()#.unsqueeze(3).repeat(1,1,1,44).numpy()
+#     train_label = dataset.annotations.detach().cpu().permute(1,2,3,0).numpy()
+#     test_label  = dataset.label.detach().cpu().permute(1,2,3,0).numpy()
     
-    # Input - Mask voxels that are not labelled before flattening the input
-    X_train = features.reshape((-1, features.shape[-1]))[train_mask.reshape(-1) == 1]
-    X_test  = features.reshape((-1, features.shape[-1]))[test_mask.reshape(-1)  == 1]
-    # Target - Same as above. Mask before flattening
-    Y_train = train_label.reshape((-1, train_label.shape[-1]))[train_mask.reshape(-1) == 1]
-    Y_test  = test_label.reshape((-1,  train_label.shape[-1]))[test_mask.reshape(-1)  == 1]
+#     # Input - Mask voxels that are not labelled before flattening the input
+#     X_train = features.reshape((-1, features.shape[-1]))[train_mask.reshape(-1) == 1]
+#     X_test  = features.reshape((-1, features.shape[-1]))[test_mask.reshape(-1)  == 1]
+#     # Target - Same as above. Mask before flattening
+#     Y_train = train_label.reshape((-1, train_label.shape[-1]))[train_mask.reshape(-1) == 1]
+#     Y_test  = test_label.reshape((-1,  train_label.shape[-1]))[test_mask.reshape(-1)  == 1]
 
-    # Init Random Forest Classifier
-    clf = RandomForestClassifier(n_estimators=100,
-                         bootstrap=True,
-                         oob_score=True,
-                         random_state=0,
-                         n_jobs=-1,
-                         max_features="auto",
-                         class_weight="balanced",
-                         max_depth=None,
-                         min_samples_leaf=cfg["min_samples_leaf"])
+#     # Init Random Forest Classifier
+#     clf = RandomForestClassifier(n_estimators=100,
+#                          bootstrap=True,
+#                          oob_score=True,
+#                          random_state=0,
+#                          n_jobs=-1,
+#                          max_features="auto",
+#                          class_weight="balanced",
+#                          max_depth=None,
+#                          min_samples_leaf=cfg["min_samples_leaf"])
 
-    # Train
-    clf.fit(X_train, Y_train)
-    # predict labels in test mask
-    predicted_prob    = clf.predict_proba(X_test)
-    Y_predicted_prob  = torch.tensor([p[:, 1] for p in predicted_prob]).T
-    Y_predicted_label = (Y_predicted_prob > 0.5)*1
+#     # Train
+#     clf.fit(X_train, Y_train)
+#     # predict labels in test mask
+#     predicted_prob    = clf.predict_proba(X_test)
+#     Y_predicted_prob  = torch.tensor([p[:, 1] for p in predicted_prob]).T
+#     Y_predicted_label = (Y_predicted_prob > 0.5)*1
 
 
-                ###############################
-                ####### Save Prediction #######
-                ###############################
+#                 ###############################
+#                 ####### Save Prediction #######
+#                 ###############################
                 
-    n_classes = len(cfg['labels'])
-    prediction = torch.zeros((145,145,145, n_classes))
-    prediction.view(-1, n_classes)[test_mask.reshape(-1)  == 1] = Y_predicted_label.float()
+#     n_classes = len(cfg['labels'])
+#     prediction = torch.zeros((145,145,145, n_classes))
+#     prediction.view(-1, n_classes)[test_mask.reshape(-1)  == 1] = Y_predicted_label.float()
 
-                ###############################
-                ##### Evaluate Prediction #####
-                ###############################
+#                 ###############################
+#                 ##### Evaluate Prediction #####
+#                 ###############################
+
+#     # Constant for numerical stability
+#     eps = 1e-5
+#     # statictics for precision, recall and Dice (f1)
+#     TP       = (Y_predicted_label * Y_test).sum(axis=0)
+#     TPplusFP = Y_predicted_label.sum(axis=0)
+#     TPplusFN = Y_test.sum(axis=0)
+
+#     precision = (TP + eps) / (TPplusFP + eps)
+#     recall    = (TP + eps) / (TPplusFN + eps)
+#     f1        = (2 * precision * recall + eps) / ( precision + recall  + eps)
+
+#     labels = cfg["labels"]
+#     scores = {}
+#     for c in range(len(labels)):
+#         scores[f"{labels[c]}_precision"] = precision[c].numpy()
+#         scores[f"{labels[c]}_recall"] = recall[c].numpy()
+#         scores[f"{labels[c]}_f1"] = f1[c].numpy()
+
+#     scores["Avg_prec_tracts"] = precision[1:].mean().numpy()
+#     scores["Avg_recall_tracts"] = recall[1:].mean().numpy()
+#     scores["Avg_f1_tracts"] = f1[1:].mean().numpy()
     
-    current_correct = torch.eq(Y_predicted_label, torch.tensor(Y_test)) * 1
-    total_mistakes = torch.ne(Y_predicted_label, torch.tensor(Y_test))
-    false_positives = ((1 - Y_predicted_label) * Y_test)
-    false_negatives = (Y_predicted_label * (1-Y_test))
     
-    print(current_correct.shape, total_mistakes.shape)
-    if prev_correct is None:
-        bad_mistakes = torch.zeros(5)   
-        bad_positives = torch.zeros(5)   
-        bad_negatives = torch.zeros(5)   
-    else:
-        print("step 3")
-        bad_mistakes  = (total_mistakes  * prev_correct).sum(0) / prev_correct.sum(0)
-        bad_positives = (false_positives * prev_correct).sum(0)
-        bad_negatives = (false_negatives * prev_correct).sum(0)
+
+#     return scores, prediction.permute(3,0,1,2)
+
+
+# def evaluate_RF_tmp(dataset: Dataset, features: Tensor, prev_correct: Tensor,
+#                     cfg: Dict[str, str]) -> Union[Dict[str, float], Tensor]:
+
+#                 ###############################
+#                 ##### TRAIN RANDOM FOREST #####
+#                 ###############################
+                
+#     train_mask  = dataset.weight.detach().cpu().squeeze().numpy()    #.permute(0,2,3,1).repeat(1,1,1,44).numpy()
+#     test_mask   = dataset.brain_mask.detach().cpu().numpy()#.unsqueeze(3).repeat(1,1,1,44).numpy()
+#     train_label = dataset.annotations.detach().cpu().permute(1,2,3,0).numpy()
+#     test_label  = dataset.label.detach().cpu().permute(1,2,3,0).numpy()
+    
+#     # Input - Mask voxels that are not labelled before flattening the input
+#     X_train = features.reshape((-1, features.shape[-1]))[train_mask.reshape(-1) == 1]
+#     X_test  = features.reshape((-1, features.shape[-1]))[test_mask.reshape(-1)  == 1]
+#     # Target - Same as above. Mask before flattening
+#     Y_train = train_label.reshape((-1, train_label.shape[-1]))[train_mask.reshape(-1) == 1]
+#     Y_test  = test_label.reshape((-1,  train_label.shape[-1]))[test_mask.reshape(-1)  == 1]
+
+#     # Init Random Forest Classifier
+#     clf = RandomForestClassifier(n_estimators=100,
+#                          bootstrap=True,
+#                          oob_score=True,
+#                          random_state=0,
+#                          n_jobs=-1,
+#                          max_features="auto",
+#                          class_weight="balanced",
+#                          max_depth=None,
+#                          min_samples_leaf=cfg["min_samples_leaf"])
+
+#     # Train
+#     clf.fit(X_train, Y_train)
+#     # predict labels in test mask
+#     predicted_prob    = clf.predict_proba(X_test)
+#     Y_predicted_prob  = torch.tensor([p[:, 1] for p in predicted_prob]).T
+#     Y_predicted_label = (Y_predicted_prob > 0.5)*1
+
+
+#                 ###############################
+#                 ####### Save Prediction #######
+#                 ###############################
+                
+#     n_classes = len(cfg['labels'])
+#     prediction = torch.zeros((145,145,145, n_classes))
+#     prediction.view(-1, n_classes)[test_mask.reshape(-1)  == 1] = Y_predicted_label.float()
+
+#                 ###############################
+#                 ##### Evaluate Prediction #####
+#                 ###############################
+    
+#     current_correct = torch.eq(Y_predicted_label, torch.tensor(Y_test)) * 1
+#     total_mistakes = torch.ne(Y_predicted_label, torch.tensor(Y_test))
+#     false_positives = ((1 - Y_predicted_label) * Y_test)
+#     false_negatives = (Y_predicted_label * (1-Y_test))
+    
+#     print(current_correct.shape, total_mistakes.shape)
+#     if prev_correct is None:
+#         bad_mistakes = torch.zeros(5)   
+#         bad_positives = torch.zeros(5)   
+#         bad_negatives = torch.zeros(5)   
+#     else:
+#         print("step 3")
+#         bad_mistakes  = (total_mistakes  * prev_correct).sum(0) / prev_correct.sum(0)
+#         bad_positives = (false_positives * prev_correct).sum(0)
+#         bad_negatives = (false_negatives * prev_correct).sum(0)
 
     
-    # Constant for numerical stability
-    eps = 1e-5
-    # statictics for precision, recall and Dice (f1)
-    TP       = (Y_predicted_label * Y_test).sum(axis=0)
-    TPplusFP = Y_predicted_label.sum(axis=0)
-    TPplusFN = Y_test.sum(axis=0)
+#     # Constant for numerical stability
+#     eps = 1e-5
+#     # statictics for precision, recall and Dice (f1)
+#     TP       = (Y_predicted_label * Y_test).sum(axis=0)
+#     TPplusFP = Y_predicted_label.sum(axis=0)
+#     TPplusFN = Y_test.sum(axis=0)
 
-    precision = (TP + eps) / (TPplusFP + eps)
-    recall    = (TP + eps) / (TPplusFN + eps)
-    f1        = (2 * precision * recall + eps) / ( precision + recall  + eps)
+#     precision = (TP + eps) / (TPplusFP + eps)
+#     recall    = (TP + eps) / (TPplusFN + eps)
+#     f1        = (2 * precision * recall + eps) / ( precision + recall  + eps)
 
-    labels = cfg["labels"]
-    scores = {}
-    for c in range(len(labels)):
-        scores[f"{labels[c]}_total_mistakes"] = total_mistakes.sum(0)[c].numpy()
-        scores[f"{labels[c]}_bad_mistakes"]   = bad_mistakes[c].numpy()
-        scores[f"{labels[c]}_bad_positives"]  = bad_positives[c].numpy()
-        scores[f"{labels[c]}_bad_negatives"]  = bad_negatives[c].numpy()
+#     labels = cfg["labels"]
+#     scores = {}
+#     for c in range(len(labels)):
+#         scores[f"{labels[c]}_total_mistakes"] = total_mistakes.sum(0)[c].numpy()
+#         scores[f"{labels[c]}_bad_mistakes"]   = bad_mistakes[c].numpy()
+#         scores[f"{labels[c]}_bad_positives"]  = bad_positives[c].numpy()
+#         scores[f"{labels[c]}_bad_negatives"]  = bad_negatives[c].numpy()
 
-    scores["Avg_bad_mistakes"]  = bad_mistakes[1:].float().mean().numpy()
-    scores["Avg_bad_positives"] = bad_positives[1:].float().mean().numpy()
-    scores["Avg_bad_negatives"] = bad_negatives[1:].float().mean().numpy()
+#     scores["Avg_bad_mistakes"]  = bad_mistakes[1:].float().mean().numpy()
+#     scores["Avg_bad_positives"] = bad_positives[1:].float().mean().numpy()
+#     scores["Avg_bad_negatives"] = bad_negatives[1:].float().mean().numpy()
 
-    return scores, current_correct
+#     return scores, current_correct
 
 
 def eval_pca(dataset: Dataset, cfg: str, n_components: Iterable = np.arange(0, 50)) -> Union[np.array, List[dict]]:
