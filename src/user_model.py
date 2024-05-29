@@ -12,16 +12,16 @@ class UserModel:
         self, 
         ground_truth: Tensor, 
         cfg: dict, 
-        brush_sizes=torch.arange(2,7)
+        # brush_sizes=torch.arange(2,7)
     ):
         super().__init__()
         
         # globals
         self.gt = ground_truth.float() # nd array or float tensor?
-        if cfg['brush']:
-            self.brush_sizes = brush_sizes
-        else:
-            self.brush_sizes = [1]
+        # if 'brush' in cfg.keys():
+        self.brush_sizes = cfg['brush_sizes']
+        # else:
+        #     self.brush_sizes = [1]
         
         if cfg['slice_selection'] == 'mean':
             self.slice_selection = 'mean'
@@ -43,7 +43,7 @@ class UserModel:
         self.annotated_pixels = None
         self.annotated_slices = None
         
-    
+
     def _sum_l1_per_slice(
         self, 
         volume: Tensor
@@ -79,7 +79,6 @@ class UserModel:
         return sums
         
         
-
     def _order_slices_by_sum(
         self, 
         slice_sums: Tensor
@@ -168,6 +167,8 @@ class UserModel:
             # with highest number of overall samples        
             else:
                 n_samples[np.argmax(proportions_normalized)] -= 1
+
+        print(n_samples)
         return n_samples
 
 
@@ -231,11 +232,12 @@ class UserModel:
                 # 2D coordinates for samples from weight matrix
                 index_coords = np.unravel_index(index_list, weight.shape)
                 # apply mask via coordinates to samples for class i
-                #samples[i][index_coords] = 1   # alte Version, annotiert nur aktuell betrachtete Klasse
-                samples[:, index_coords] = ground_truth_slice[:, index_coords]
+                samples[i][index_coords] = 1   # alte Version, annotiert nur aktuell betrachtete Klasse
+                # samples[:, index_coords] = ground_truth_slice[:, index_coords] TODO: get this to run instead of the old version
                 #print(index_coords)
 
         return samples
+
 
     def sample_random_candidate_voxels(
         self, 
@@ -264,7 +266,6 @@ class UserModel:
         samples[:, index_coords] = ground_truth_slice[:, index_coords]
 
         return samples # has to have shape [5, 145, 145]
-
 
 
     def _slice_add_neighbors(self, class_samples: Tensor, ground_truth_slice: Tensor) -> Tensor:
@@ -300,7 +301,6 @@ class UserModel:
         return interaction_mask
 
 
-    
     def initial_annotation(
         self, 
         n_samples: int, 
@@ -382,7 +382,7 @@ class UserModel:
                 t_selection = self.gt[selection]
 
                 # samples voxels and add their neighborhood to 2D mask
-                n_class_samples = self._slice_samples_per_class(t_selection, inverse_size_weights, n_samples)
+                n_class_samples = self._slice_samples_per_class(t_selection, inverse_size_weights, n_samples // 3) 
                 #print(n_class_samples.sum())
                 #print(t_selection.shape, n_class_samples)
 
@@ -422,7 +422,7 @@ class UserModel:
 
         return interaction_map.float()
         
-            
+         
     def refinement_annotation(
         self,
         prediction: Tensor, 
@@ -555,7 +555,7 @@ class UserModel:
                 data_location.append((axis[0], indices[0]))
                 
         return interaction_map.float() # , selection
-    
+
     
     def random_refinement_annotation(
         self, 
@@ -672,7 +672,6 @@ class UserModel:
         return interaction_map.float() # , selection
 
 
-
     def novelty_refinement_annotation(
         self,
         annotation_mask: Tensor, 
@@ -682,9 +681,77 @@ class UserModel:
         pos_weight: float = 1, 
         seed: int = 42
     ):
-        
         pass
-        # return interaction_map.float()
+        # """ Finds the slice with the worst prediction across all three axis and 
+        #     annotates parts of it. The annotation happens in multiple steps:
+        #     (1) mask all voxels that are already annotated with annotation_mask
+        #     (2) Sample n_samples many seeding points and save their position in
+        #         an annotation mask
+        #     (3) Apply the largest quadratic brush (from a given range) to each seed
+        #         for which all affected voxels are foreground and add them to
+        #         the annotation mask as well.
+        #     (4) Mask the ground truth labels with the annotation mask and return
+
+        # Parameters
+        # ----------
+        # prediction : Tensor
+        #     predictions of segmentation model with
+        #     shape n_classes x L x W x H
+
+        # annotation_mask : Tensor
+        #     current annotation, shape n_classes x L x W x H
+
+        # n_samples : int
+        #     number of samples per slice before brushing
+
+        # Returns
+        # -------
+        # interaction_map : Tensor
+        #     new annotations, shape n_classes x L x W x H
+
+        # """
+        # # n_classes = prediction.shape[0]
+
+        # # calculate inverse class frequencies
+        # # inverse_size_weights = self.gt.mean((1,2,3)).sum() / self.gt.mean((1,2,3)).reshape((n_classes,1,1,1))
+
+        # # calculate mask for available voxels
+        # #available_voxels = 1 - annotation_mask.float() # alte Version
+        # available_voxels = 1 - torch.any(annotation_mask, dim=0, keepdim=True) * 1
+
+        # # calculate novelty scores within the available voxels
+        # diff = novelty_map * available_voxels
+
+        # # 1.1) calc slice wise scores as sum over all pixels within the slice
+        # slice_sums = self._sum_l1_per_slice(diff)
+
+        # # 1.2) order slices in descending order by their sum
+        # axis, indices = self._order_slices_by_sum(slice_sums)
+
+        # # 2.0) select slice with highest importance weight over all axes
+        # random_selection = np.random.randint(0,6)
+        # ax  = axis[0]
+        # slc = indices[0]
+        # data_location = (ax, slc)
+        # selection = [slice(None)] + [slice(None)] * 3
+        # selection[ax + 1] = slc
+
+        # # 2.1) calculate number of samples for each class from a raw difference slice
+        # diff_selection  = diff[selection]
+        # t_selection     = self.gt[selection]
+        # # n_class_samples = self._slice_samples_per_class(diff_selection, inverse_size_weights, n_samples)
+        # #print(n_class_samples.sum())
+
+        # # 2.2) for each class, sample from false negatives as often as specified in n_class_samples
+        # class_samples = self._sample_candidate_voxels(diff_selection, t_selection, n_class_samples=n_class_samples, seed=seed)
+
+        # # 2.3) brush all samples with maximum brush from list of brushes
+        # brushed_mask = self._slice_add_neighbors(class_samples, t_selection)
+
+        # # 2.4) create interaction map to return
+        # interaction_map = torch.zeros_like(self.gt, dtype=torch.int64)
+        # interaction_map[selection] = torch.bitwise_or(interaction_map[selection], brushed_mask)
+        # # interaction_map[selection] = ((interaction_map[selection].sum(0) * t_selection) > 0) * 1
 
 
 # class UserModel:
@@ -1072,3 +1139,4 @@ class UserModel:
 #         # interaction_map[selection] = ((interaction_map[selection].sum(0) * t_selection) > 0) * 1
 
 #         return interaction_map.float() # , data_location # , selection
+
