@@ -1,0 +1,50 @@
+# general
+name: 'none'
+log: True
+rank: 0
+root_dir: '../..'
+wandb:
+  project: 'VCBM24'
+
+# DATA
+data:
+  data_dir: '../../../../../data/hcp'
+  subject: 599469
+  axis: coronal
+  labels: [
+        "Other", 
+        "CG", 
+        "CST", 
+        "FX", 
+        "CC"
+    ]
+  # labels: [
+  #       "Other", 
+  #       "IFO_left", 
+  #       "IFO_right", 
+  #       "ILF_left",
+  #       "ILF_right", 
+  #       "SLF_left", 
+  #       "SLF_right"
+  #   ]
+
+# MODEL
+model: 
+  arch: 'ae'
+  encoder: 'zero'
+  decoder: 'reconstruction'
+  spatial_dim: 145
+  state_dict: 'ae_feature-extractor_all_best.pt'
+
+# RF
+min_samples_leaf: 8
+
+# USER MODEL
+brush_sizes: [1]
+slice_selection: 'mean'
+voxel_selection: 'mean'
+
+# EVALUATION
+init_voxels: 100
+refinement_voxels: 200
+num_interactions: 10
