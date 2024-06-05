@@ -232,8 +232,14 @@ class UserModel:
                 # 2D coordinates for samples from weight matrix
                 index_coords = np.unravel_index(index_list, weight.shape)
                 # apply mask via coordinates to samples for class i
-                samples[i][index_coords] = 1   # alte Version, annotiert nur aktuell betrachtete Klasse
-                # samples[:, index_coords] = ground_truth_slice[:, index_coords] TODO: get this to run instead of the old version
+                # print(samples.shape)
+                for l in range(len(samples)):
+                    samples[l][index_coords] = ground_truth_slice[l][index_coords]
+                # print(samples.sum())
+                # # samples[i][index_coords] = 1   # alte Version, annotiert nur aktuell betrachtete Klasse
+                # samples.view(n_class_samples.shape[0], -1)[index_list] = ground_truth_slice.view(n_class_samples.shape[0], -1)[index_list]
+                # # samples[:, index_coords] = ground_truth_slice[:, index_coords] # TODO: get this to run instead of the old version
+                # print(samples.sum())
                 #print(index_coords)
 
         return samples
@@ -535,11 +541,11 @@ class UserModel:
                 selection[ax + 1] = slc
 
                 # 2.1) calculate number of samples for each class from a raw difference slice
-                diff_selection  = diff[selection]
-                t_selection     = self.gt[selection]
+                diff_selection = diff[selection]
+                t_selection    = self.gt[selection]
                 
                 slice_sample_weights = inverse_size_weights * cweight * n_classes / (n_classes+1) * pos_weight + \
-                                    inverse_size_weights * (1-cweight) / ( (n_classes+1) * (n_classes-1) )
+                    inverse_size_weights * (1-cweight) / ( (n_classes+1) * (n_classes-1) )
                 
                 n_class_samples = self._slice_samples_per_class(t_selection, slice_sample_weights, n_samples)
                 #print(n_class_samples, n_samples)
@@ -615,13 +621,13 @@ class UserModel:
             random_axis = np.random.randint(0,3)
             match random_axis:
                 case 0:
-                    sclice_sums = torch.sum(random_mask, axis=(1,2))
+                    slice_sums = torch.sum(random_mask, axis=(1,2))
                 case 1:
-                    sclice_sums = torch.sum(random_mask, axis=(0,2))
+                    slice_sums = torch.sum(random_mask, axis=(0,2))
                 case 2:
-                    sclice_sums = torch.sum(random_mask, axis=(0,1))
+                    slice_sums = torch.sum(random_mask, axis=(0,1))
 
-            valid_slice_indices = torch.where(sclice_sums >= n_samples)[0]
+            valid_slice_indices = torch.where(slice_sums >= n_samples)[0]
             random_slice_index = np.random.choice(valid_slice_indices)     
 
             ax = random_axis

@@ -276,7 +276,7 @@ class EvalDataset(Dataset):
         if self.init == 'per_class':
             mode = 'per_class'
             
-        if self.init == 'three_slices':
+        elif self.init == 'three_slices':
             mode = 'single_slice'
 
         return self.user.random_refinement_annotation(
@@ -300,10 +300,10 @@ class EvalDataset(Dataset):
         if self.init == 'per_class':
             mode = 'per_class'
             
-        if self.init == 'three_slices':
+        elif self.init == 'three_slices':
             mode = 'single_slice'
         
-        if random:
+        elif random:
             return self.user.random_refinement_annotation(
                 prediction, 
                 self.annotations.detach().cpu(),
