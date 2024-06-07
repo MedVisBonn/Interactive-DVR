@@ -11,6 +11,7 @@ class UserModel:
     def __init__(
         self, 
         ground_truth: Tensor, 
+        guidance: str,
         cfg: dict, 
         # brush_sizes=torch.arange(2,7)
     ):
@@ -18,6 +19,7 @@ class UserModel:
         
         # globals
         self.gt = ground_truth.float() # nd array or float tensor?
+        self.guidance = guidance
         # if 'brush' in cfg.keys():
         self.brush_sizes = cfg['brush_sizes']
         # else:
@@ -148,6 +150,7 @@ class UserModel:
         total                  = slc_abs.sum(dim=(1,2))
         proportions            = total * inverse_frequencies.flatten()
         proportions_normalized = proportions / proportions.sum()
+        # print("freq", inverse_frequencies)
 
         # quantize sample proportions to get preliminary number
         # of samples
@@ -168,7 +171,7 @@ class UserModel:
             else:
                 n_samples[np.argmax(proportions_normalized)] -= 1
 
-        print(n_samples)
+        # print("resulting samples", n_samples)
         return n_samples
 
 
@@ -228,7 +231,20 @@ class UserModel:
             if num_samples > 0:
                 # 1D coordinates for samples from weight matrix
                 #print(num_samples)
-                index_list = list(sampler(weight.flatten(), num_samples=num_samples, replacement=False))
+                # print(weight.shape)
+                if self.guidance == 'ground_truth':
+                    index_list = list(sampler(weight.flatten(), num_samples=num_samples, replacement=False))
+                elif self.guidance == 'estimated':
+                    index_list = list(weight.flatten().sort(descending=True).indices[:num_samples])
+                
+                else:
+                    raise ValueError('Invalid guidance. Choose between "ground_truth" and "estimated".')
+                    
+                # index_list = list(sampler(weight.flatten(), num_samples=num_samples, replacement=False))
+                # print(
+                #     index_list_new,
+                #     index_list
+                # )
                 # 2D coordinates for samples from weight matrix
                 index_coords = np.unravel_index(index_list, weight.shape)
                 # apply mask via coordinates to samples for class i
@@ -437,7 +453,8 @@ class UserModel:
         n_samples: int, 
         mode: int = 'single_slice', 
         pos_weight: float = 1, 
-        seed: int = 42
+        seed: int = 42,
+        inverse_class_freq: bool = True
     ) -> Tensor:
         """ Finds the slice with the worst prediction across all three axis and 
             annotates parts of it. The annotation happens in multiple steps:
@@ -470,7 +487,10 @@ class UserModel:
         n_classes = prediction.shape[0]
 
         # calculate inverse class frequencies
-        inverse_size_weights = self.gt.mean((1,2,3)).sum() / self.gt.mean((1,2,3)).reshape((n_classes,1,1,1))
+        if inverse_class_freq:
+            inverse_size_weights = self.gt.mean((1,2,3)).sum() / self.gt.mean((1,2,3)).reshape((n_classes,1,1,1))
+        else:
+            inverse_size_weights = torch.ones((n_classes,1,1,1))
 
         # calculate mask for available voxels
         #available_voxels = 1 - annotation_mask.float() # alte Version

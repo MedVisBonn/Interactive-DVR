@@ -153,16 +153,19 @@ class EvalDataset(Dataset):
         self.get_tract_masks(self.labels)
 
         if self.axis == 'coronal':
-            self.data_in = self.data_in.permute(1,3,2,0).rot90(2, dims=[1,2])[14:159]
-            self.brain_mask = self.brain_mask.permute(1,2,0).rot90(2, dims=[1,2])[14:159]
-            self.label = self.label.permute(0,2,3,1).rot90(2, dims=[2,3])[:,14:159]
+            self.data_in = self.data_in.permute(1,3,2,0).rot90(1, dims=[2,3])[14:159]
+            self.brain_mask = self.brain_mask.permute(1,2,0).rot90(1, dims=[1,2])[14:159]
+            self.label = self.label.permute(0,2,3,1).rot90(1, dims=[2,3])[:,14:159]
         else:
             raise NotImplementedError("Only coronal axis is supported at the moment")
 
         # if cfg['log']:
         #    wandb.config.update({'labels': cfg['labels']})
             
-        self.user = UserModel(self.label, cfg)
+        self.user = UserModel(
+            ground_truth=self.label, 
+            guidance=cfg["guidance"],
+            cfg=cfg)
             
         # [classes, B, H, W]
         self.annotations = None
@@ -303,7 +306,7 @@ class EvalDataset(Dataset):
         elif self.init == 'three_slices':
             mode = 'single_slice'
         
-        elif random:
+        if random:
             return self.user.random_refinement_annotation(
                 prediction, 
                 self.annotations.detach().cpu(),
