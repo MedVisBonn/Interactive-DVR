@@ -220,6 +220,9 @@ class UserModel:
         # print(weights.shape, (weights>0).sum(axis=(1,2)))
         weights = weights / (weights>0).sum(axis=(1,2)).reshape(-1,1,1)
         # iterate over classes, sampling for each independently
+
+        # print(weights.shape, n_class_samples, slc.shape[0])
+
         for weight, num_samples, i in zip(weights, n_class_samples, range(slc.shape[0])):
             
             # generate uniform weights for false negative voxels
@@ -249,14 +252,17 @@ class UserModel:
                 index_coords = np.unravel_index(index_list, weight.shape)
                 # apply mask via coordinates to samples for class i
                 # print(samples.shape)
-                for l in range(len(samples)):
-                    samples[l][index_coords] = ground_truth_slice[l][index_coords]
+                # for l in range(len(samples)):
+                #     samples[l][index_coords] = ground_truth_slice[l][index_coords]
                 # print(samples.sum())
-                # # samples[i][index_coords] = 1   # alte Version, annotiert nur aktuell betrachtete Klasse
+                print(samples.sum())
+                samples[i][index_coords] = 1   # alte Version, annotiert nur aktuell betrachtete Klasse
                 # samples.view(n_class_samples.shape[0], -1)[index_list] = ground_truth_slice.view(n_class_samples.shape[0], -1)[index_list]
                 # # samples[:, index_coords] = ground_truth_slice[:, index_coords] # TODO: get this to run instead of the old version
                 # print(samples.sum())
                 #print(index_coords)
+
+        print(samples.sum())
 
         return samples
 
@@ -452,6 +458,7 @@ class UserModel:
         uncertainty_map: Tensor,
         n_samples: int, 
         mode: int = 'single_slice', 
+        map_type: str = 'per_class',
         pos_weight: float = 1, 
         seed: int = 42,
         inverse_class_freq: bool = True
@@ -525,10 +532,17 @@ class UserModel:
             # 2.1) calculate number of samples for each class from a raw difference slice
             diff_selection  = diff[selection]
             t_selection     = self.gt[selection]
-            n_class_samples = self._slice_samples_per_class(diff_selection, inverse_size_weights, n_samples)
+            if map_type == 'per_class':
+                n_class_samples = self._slice_samples_per_class(diff_selection, inverse_size_weights, n_samples)
+            elif map_type == 'per_slice':
+                n_class_samples = torch.zeros(n_classes)
+                n_class_samples[0] = n_samples
+            else:
+                raise ValueError('Invalid map type. Choose between "per_class" and "per_slice".')
             #print(n_class_samples.sum())
 
             # 2.2) for each class, sample from false negatives as often as specified in n_class_samples
+            # print(diff_selection.shape, diff.shape, n_class_samples)
             class_samples = self._sample_candidate_voxels(diff_selection, t_selection, n_class_samples=n_class_samples, seed=seed)
 
             # 2.3) brush all samples with maximum brush from list of brushes
