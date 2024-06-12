@@ -218,6 +218,8 @@ class UserModel:
         weights = torch.abs(slc).max(dim=0).values * ground_truth_slice # 5 x 145 x 145 , neue Version
 
         # print(weights.shape, (weights>0).sum(axis=(1,2)))
+        if self.guidance == 'ground_truth':
+            weights = weights ** 2
         weights = weights / (weights>0).sum(axis=(1,2)).reshape(-1,1,1)
         # iterate over classes, sampling for each independently
 
@@ -239,6 +241,8 @@ class UserModel:
                     index_list = list(sampler(weight.flatten(), num_samples=num_samples, replacement=False))
                 elif self.guidance == 'estimated':
                     index_list = list(weight.flatten().sort(descending=True).indices[:num_samples])
+                    # n_candidates = weight[weight > 0].flatten().shape[0]
+                    # index_list = np.unique(((np.linspace(0, 1, num=num_samples)**4) * (n_candidates-1)).astype(int))
                 
                 else:
                     raise ValueError('Invalid guidance. Choose between "ground_truth" and "estimated".')
@@ -252,17 +256,15 @@ class UserModel:
                 index_coords = np.unravel_index(index_list, weight.shape)
                 # apply mask via coordinates to samples for class i
                 # print(samples.shape)
-                # for l in range(len(samples)):
-                #     samples[l][index_coords] = ground_truth_slice[l][index_coords]
+                for l in range(len(samples)):
+                    samples[l][index_coords] = ground_truth_slice[l][index_coords]
                 # print(samples.sum())
-                print(samples.sum())
-                samples[i][index_coords] = 1   # alte Version, annotiert nur aktuell betrachtete Klasse
+                # samples[i][index_coords] = 1   # alte Version, annotiert nur aktuell betrachtete Klasse
                 # samples.view(n_class_samples.shape[0], -1)[index_list] = ground_truth_slice.view(n_class_samples.shape[0], -1)[index_list]
                 # # samples[:, index_coords] = ground_truth_slice[:, index_coords] # TODO: get this to run instead of the old version
                 # print(samples.sum())
                 #print(index_coords)
 
-        print(samples.sum())
 
         return samples
 
@@ -543,6 +545,7 @@ class UserModel:
 
             # 2.2) for each class, sample from false negatives as often as specified in n_class_samples
             # print(diff_selection.shape, diff.shape, n_class_samples)
+            print(diff_selection.shape)
             class_samples = self._sample_candidate_voxels(diff_selection, t_selection, n_class_samples=n_class_samples, seed=seed)
 
             # 2.3) brush all samples with maximum brush from list of brushes
@@ -594,7 +597,7 @@ class UserModel:
                 interaction_map[selection] = torch.bitwise_or(interaction_map[selection], brushed_mask)
                 data_location.append((axis[0], indices[0]))
                 
-        return interaction_map.float() # , selection
+        return interaction_map.float() , selection
 
     
     def random_refinement_annotation(
