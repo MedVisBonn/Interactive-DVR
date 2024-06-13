@@ -13,10 +13,10 @@ data:
   axis: coronal
   labels: [
         "Other", 
-        "CG", 
+        "CG", # cingulum
         "CST", 
         "FX", 
-        "CC"
+        "CC"  # corpus callosum
     ]
   # labels: [
   #       "Other", 
