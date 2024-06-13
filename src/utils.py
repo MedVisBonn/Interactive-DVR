@@ -34,6 +34,19 @@ def debugging(message):
     print("\n")
     print("\n")
 
+def get_features(
+    model: nn.Module, 
+    dataset: Dataset
+):
+    f_layer = 'encoder'
+    extractor = FeatureExtractor(model, layers=[f_layer])
+    hooked_results = extractor(dataset)
+    features = hooked_results[f_layer]
+    features = features.permute(0,2,3,1).numpy()
+    return features
+
+
+
 
 ###############################################################################
 ################################# TRAIN MODEL #################################
@@ -696,3 +709,21 @@ def eval_pca(dataset: Dataset, cfg: str, n_components: Iterable = np.arange(0, 5
         scores_list.append(scores)
         
     return np.cumsum(explained_variance_ratio), scores_list
+
+
+def simulate_user_interaction(dataset : Dataset, 
+    features: Tensor,
+    cfg
+):
+    
+    scores, prediction, uncertainty_maps, uncertainty_per_class_maps = evaluate_RF(
+        dataset, 
+        features, 
+        cfg,
+        uncertainty_measures=[
+        # 'ground-truth',
+        # 'entropy',
+        # 'feature-distance',
+    ]
+)
+    print(scores)
