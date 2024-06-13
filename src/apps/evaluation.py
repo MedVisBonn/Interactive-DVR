@@ -17,7 +17,8 @@ def main(
 ):
     # get dataset
     dataset = get_eval_dataset(
-        cfg=cfg
+        cfg=cfg,
+        initial_annotation=True
     )
 
     # get model and load state dict

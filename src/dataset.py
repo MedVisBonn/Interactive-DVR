@@ -14,7 +14,8 @@ from utils import *
 
 
 def get_eval_dataset(
-    cfg: OmegaConf
+    cfg: OmegaConf,
+    initial_annotation: bool = True
 ):
     dataset = EvalDataset(
         subject_id=cfg.data.subject, 
@@ -24,9 +25,10 @@ def get_eval_dataset(
         init=cfg["init_mode"]  
     )
 
-    dataset.clear_annotation()
-    annot = dataset.initial_annotation(seed=42)
-    dataset.update_annotation(annot)
+    if initial_annotation:
+        dataset.clear_annotation()
+        annot = dataset.initial_annotation(seed=42)
+        dataset.update_annotation(annot)
 
     return dataset
 

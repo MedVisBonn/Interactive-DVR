@@ -711,7 +711,8 @@ def eval_pca(dataset: Dataset, cfg: str, n_components: Iterable = np.arange(0, 5
     return np.cumsum(explained_variance_ratio), scores_list
 
 
-def simulate_user_interaction(dataset : Dataset, 
+def simulate_user_interaction(
+    dataset : Dataset, 
     features: Tensor,
     cfg
 ):
@@ -724,6 +725,6 @@ def simulate_user_interaction(dataset : Dataset,
         # 'ground-truth',
         # 'entropy',
         # 'feature-distance',
-    ]
-)
+        ]
+    )
     print(scores)
