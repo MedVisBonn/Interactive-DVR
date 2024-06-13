@@ -5,6 +5,7 @@ trained_models/*
 models/*
 trainer_logs/*
 data/*
+results/*
 
 **/wandb/*
 **/outputs/*
