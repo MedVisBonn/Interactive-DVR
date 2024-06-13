@@ -13,6 +13,23 @@ from user_model import UserModel
 from utils import *
 
 
+def get_eval_dataset(
+    cfg: OmegaConf
+):
+    dataset = EvalDataset(
+        subject_id=cfg.data.subject, 
+        cfg=cfg,
+        modality='segmentation',
+        to_gpu=False,
+        init=cfg["init_mode"]  
+    )
+
+    dataset.clear_annotation()
+    annot = dataset.initial_annotation(seed=42)
+    dataset.update_annotation(annot)
+
+    return dataset
+
 
 def get_train_loader(
     cfg: OmegaConf

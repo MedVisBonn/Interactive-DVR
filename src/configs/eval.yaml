@@ -46,6 +46,7 @@ voxel_selection: 'max'
 guidance: 'ground_truth'
 
 # EVALUATION
+init_mode: 'per_class'  # 'three_slices'
 init_voxels: 200
 refinement_voxels: 200
 num_interactions: 10
