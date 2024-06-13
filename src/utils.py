@@ -34,6 +34,9 @@ def debugging(message):
     print("\n")
     print("\n")
 
+
+
+
 def get_features(
     model: nn.Module, 
     dataset: Dataset
@@ -358,7 +361,13 @@ def uncertainty_sd(train_label, test_mask, n_classes):
     return spatial_distance_map, sd_map_per_class.permute(1,2,3,0)
 
 
-def uncertainty_fd(train_label, features, test_mask, n_classes):
+def uncertainty_fd(
+    train_label, 
+    features, 
+    test_mask, 
+    n_classes,
+    class_wise: str = False
+):
     
     train_label_tensor = torch.from_numpy(train_label)
     annotated_voxels = torch.any(train_label_tensor, dim=-1)
@@ -375,19 +384,20 @@ def uncertainty_fd(train_label, features, test_mask, n_classes):
     brain_na_mask = brain_mask_tensor & ~annotated_voxels
     anomaly_scores_map = torch.zeros((145,145,145))
     anomaly_scores_map[brain_na_mask] = compute_anomaly_scores(annotated_features, brain_na_mask)
-    anomaly_scores_map -= anomaly_scores_map.min()
-    anomaly_scores_map /= anomaly_scores_map.max()
+    # anomaly_scores_map -= anomaly_scores_map.min()
+    # anomaly_scores_map /= anomaly_scores_map.max()
 
     # per class
     fd_map_per_class = torch.zeros((n_classes, 145,145,145))
-    for i in range(n_classes):
-        train_label_i = train_label_tensor[:,:,:,i].bool()
-        annotated_features = features[train_label_i].reshape(-1, 44)
-        brain_na_mask = brain_mask_tensor & ~train_label_i
-        fd_map_per_class[i, brain_na_mask == 1] = compute_anomaly_scores(annotated_features, brain_na_mask)
-    fd_map_per_class[:, annotated_voxels] = 0 # all values of annotated voxels should be 0
-    fd_map_per_class -= fd_map_per_class.amin(dim=(1,2,3), keepdim=True)
-    fd_map_per_class /= fd_map_per_class.amax(dim=(1,2,3), keepdim=True)
+    if class_wise:
+        for i in range(n_classes):
+            train_label_i = train_label_tensor[:,:,:,i].bool()
+            annotated_features = features[train_label_i].reshape(-1, 44)
+            brain_na_mask = brain_mask_tensor & ~train_label_i
+            fd_map_per_class[i, brain_na_mask == 1] = compute_anomaly_scores(annotated_features, brain_na_mask)
+        fd_map_per_class[:, annotated_voxels] = 0 # all values of annotated voxels should be 0
+        # fd_map_per_class -= fd_map_per_class.amin(dim=(1,2,3), keepdim=True)
+        # fd_map_per_class /= fd_map_per_class.amax(dim=(1,2,3), keepdim=True)
 
     return anomaly_scores_map, fd_map_per_class.permute(1,2,3,0)
 
