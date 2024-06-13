@@ -34,7 +34,7 @@ def main(
         dataset=dataset
     )
 
-    # get results after initial annotation
+    # get results
     results = simulate_user_interaction(
         dataset=dataset,
         features=features,
