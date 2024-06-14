@@ -1,5 +1,6 @@
 # general
 name: 'none'
+verbose: True
 log: True
 rank: 0
 root_dir: '../..'
@@ -34,7 +35,7 @@ model:
   encoder: 'zero'
   decoder: 'reconstruction'
   spatial_dim: 145
-  state_dict: 'ae_feature-extractor_all_best.pt'
+  state_dict: 'ae_feature-extractor_all_old.pt'
 
 # RF
 min_samples_leaf: 8
@@ -43,11 +44,12 @@ min_samples_leaf: 8
 brush_sizes: [1]
 slice_selection: 'max'
 voxel_selection: 'max'
-guidance: 'ground_truth'
+guidance: 'log'
 
 # EVALUATION
 init_mode: 'per_class'  # 'three_slices'
-init_voxels: 200
-refinement_voxels: 200
-num_interactions: 10
-novelty: True
+init_voxels: 100
+refinement_voxels: 100
+num_interactions: 0
+uncertainty_measure: 'entropy'
+background_bias: True

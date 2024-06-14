@@ -15,30 +15,43 @@ from utils import get_features, simulate_user_interaction
 def main(
     cfg
 ):
+    verbose = cfg.verbose
+
     # get dataset
     dataset = get_eval_dataset(
         cfg=cfg,
-        initial_annotation=True
+        initial_annotation=True,
+        verbose=verbose
     )
 
     # get model and load state dict
     model, state_dict = get_model(
         cfg=cfg,
-        return_state_dict=True
+        return_state_dict=True,
+        verbose=verbose
     )
     model.load_state_dict(state_dict)
 
     # get features
     features = get_features(
         model=model,
-        dataset=dataset
+        dataset=dataset,
+        verbose=verbose
     )
 
     # get results
+    uncertainty_measures = [
+        cfg.uncertainty_measure
+    ]
+    if cfg.background_bias:
+        uncertainty_measures.append('feature-distance')
+
     results = simulate_user_interaction(
         dataset=dataset,
         features=features,
-        cfg=cfg 
+        uncertainty_measures=uncertainty_measures,
+        cfg=cfg,
+        verbose=verbose
     )
 
 

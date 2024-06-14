@@ -15,8 +15,11 @@ from utils import *
 
 def get_eval_dataset(
     cfg: OmegaConf,
-    initial_annotation: bool = True
-):
+    initial_annotation: bool = True,
+    verbose: bool = False
+):  
+    if verbose:
+        print(f"Loading dataset for subject {cfg.data.subject} ...")
     dataset = EvalDataset(
         subject_id=cfg.data.subject, 
         cfg=cfg,
@@ -24,12 +27,14 @@ def get_eval_dataset(
         to_gpu=False,
         init=cfg["init_mode"]  
     )
-
     if initial_annotation:
+        if verbose:
+            print("Sampling initial annotations ...")
         dataset.clear_annotation()
         annot = dataset.initial_annotation(seed=42)
         dataset.update_annotation(annot)
-
+    if verbose:
+        print('Done.\n')
     return dataset
 
 

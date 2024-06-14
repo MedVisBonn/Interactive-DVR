@@ -6,19 +6,27 @@ from layer import *
 
 def get_model(
     cfg,
-    return_state_dict=False
+    return_state_dict=False,
+    verbose: bool = False
 ):
+    if verbose:
+        print(f'Loading model: {cfg.model.encoder} -> {cfg.model.decoder} with spatial dim {cfg.model.spatial_dim}')
     model = DualBranchAE(
         encoder=cfg.model.encoder,
         decoder=cfg.model.decoder,
         in_size=cfg.model.spatial_dim,
     )
 
+
     if return_state_dict:
         path = f'{cfg.root_dir}/models/{cfg.model.state_dict}'
         state_dict = torch.load(path)['model_dict']
+        if verbose:
+            print(f"Done. Returning model and state dict {cfg.model.state_dict}.\n")
         return model, state_dict
     else:
+        if verbose:
+            print("Done. Returning model only.\n")
         return model
 
 class DualBranchAE(nn.Module):

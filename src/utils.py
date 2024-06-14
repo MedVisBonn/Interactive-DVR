@@ -39,13 +39,19 @@ def debugging(message):
 
 def get_features(
     model: nn.Module, 
-    dataset: Dataset
-):
+    dataset: Dataset,
+    tta: bool = False,
+    verbose: bool = False
+):  
+    if verbose:
+        print("Extracting features...")
     f_layer = 'encoder'
     extractor = FeatureExtractor(model, layers=[f_layer])
     hooked_results = extractor(dataset)
     features = hooked_results[f_layer]
     features = features.permute(0,2,3,1).numpy()
+    if verbose:
+        print("Done.\n")
     return features
 
 
@@ -400,14 +406,24 @@ def uncertainty_fd(
     def compute_anomaly_scores(annotated_features, mask):
         iforest = IsolationForest(n_estimators=100, random_state=0, n_jobs=-1).fit(annotated_features)
         anomaly_scores = iforest.decision_function(features[mask].reshape(-1, 44))
-        anomaly_scores = (anomaly_scores - anomaly_scores.min()) / (anomaly_scores.max() - anomaly_scores.min())
-        return torch.from_numpy(1 - anomaly_scores).float()
+        return torch.from_numpy(anomaly_scores).float()
+        # anomaly_scores = (anomaly_scores - anomaly_scores.min()) / (anomaly_scores.max() - anomaly_scores.min())
+        # return torch.from_numpy(1 - anomaly_scores).float()
     
+    
+
     # all classes
     annotated_features = features[annotated_voxels].reshape(-1, 44)
     brain_na_mask = brain_mask_tensor & ~annotated_voxels
     anomaly_scores_map = torch.zeros((145,145,145))
     anomaly_scores_map[brain_na_mask] = compute_anomaly_scores(annotated_features, brain_na_mask)
+    min_score = anomaly_scores_map.min()
+    max_score = anomaly_scores_map.max()
+
+    anomaly_scores_map = (anomaly_scores_map - min_score) / (max_score - min_score)
+    anomaly_scores_map = 1 - anomaly_scores_map
+    t = (0 - min_score) / (max_score - min_score)
+    t = 1 - t
     # anomaly_scores_map -= anomaly_scores_map.min()
     # anomaly_scores_map /= anomaly_scores_map.max()
 
@@ -423,7 +439,39 @@ def uncertainty_fd(
         # fd_map_per_class -= fd_map_per_class.amin(dim=(1,2,3), keepdim=True)
         # fd_map_per_class /= fd_map_per_class.amax(dim=(1,2,3), keepdim=True)
 
-    return anomaly_scores_map, fd_map_per_class.permute(1,2,3,0)
+    return anomaly_scores_map, fd_map_per_class.permute(1,2,3,0), t
+
+
+
+def get_scores(
+    pred, 
+    gt,
+    cfg
+):
+    # Constant for numerical stability
+    eps = 1e-5
+    # statictics for precision, recall and Dice (f1)
+    TP       = (pred * gt).sum(axis=1)
+    TPplusFP = pred.sum(axis=1)
+    TPplusFN = gt.sum(axis=1)
+
+    precision = (TP + eps) / (TPplusFP + eps)
+    recall    = (TP + eps) / (TPplusFN + eps)
+    f1        = (2 * precision * recall + eps) / ( precision + recall  + eps)
+    
+    labels = cfg['data']["labels"]
+    scores = {}
+    for c in range(len(labels)):
+        scores[f"{labels[c]}_precision"] = precision[c].numpy()
+        scores[f"{labels[c]}_recall"] = recall[c].numpy()
+        scores[f"{labels[c]}_f1"] = f1[c].numpy()
+
+    scores["Avg_prec_tracts"] = precision[1:].mean().numpy()
+    scores["Avg_recall_tracts"] = recall[1:].mean().numpy()
+    scores["Avg_f1_tracts"] = f1[1:].mean().numpy()
+
+    return scores
+
 
 
 def evaluate_RF(
@@ -510,6 +558,7 @@ def evaluate_RF(
     uncertainty_per_class_maps = {}
 
     for measure in uncertainty_measures:
+        t = None
         match measure:
             case 'ground-truth':
                 continue
@@ -520,7 +569,7 @@ def evaluate_RF(
             case 'spatial-distance':
                 uncertainty_map, uncertainty_per_class = uncertainty_sd(train_label, test_mask, n_classes)
             case 'feature-distance':
-                uncertainty_map, uncertainty_per_class = uncertainty_fd(train_label, features, test_mask, n_classes)
+                uncertainty_map, uncertainty_per_class, t = uncertainty_fd(train_label, features, test_mask, n_classes)
             case _:
                 raise ValueError(f"Uncertainty measure {measure} not implemented")
 
@@ -541,7 +590,7 @@ def evaluate_RF(
     scores["Avg_f1_tracts"] = f1[1:].mean().numpy()
     
     
-    return scores, prediction.permute(3,0,1,2), uncertainty_maps, uncertainty_per_class_maps
+    return scores, prediction.permute(3,0,1,2), uncertainty_maps, uncertainty_per_class_maps, t
 
 
 
@@ -748,42 +797,60 @@ def eval_pca(dataset: Dataset, cfg: str, n_components: Iterable = np.arange(0, 5
 def simulate_user_interaction(
     dataset : Dataset, 
     features: Tensor,
-    cfg
+    uncertainty_measures: List[str],
+    cfg,
+    verbose: bool = False
 ):
 
     results = []
 
     # results of initial annotation
-    scores, prediction, uncertainty_maps, uncertainty_per_class_maps = evaluate_RF(
-        dataset, 
-        features, 
-        cfg,
-        uncertainty_measures=[
-        # 'ground-truth',
-         'entropy',
-         'feature-distance',
-        ]
+    scores, prediction, uncertainty_maps, uncertainty_per_class_maps, t = evaluate_RF(
+        dataset=dataset, 
+        features=features, 
+        cfg=cfg,
+        uncertainty_measures=uncertainty_measures
     )
+
+    # add background bias
+    if cfg.background_bias:
+        background_class = torch.zeros(len(cfg.data.labels))
+        background_class[0] = 1
+        prediction = add_background_bias(
+            prediction=prediction,
+            anomaly_score_map=uncertainty_maps['feature-distance'],
+            background_class=background_class,
+            threshold=t
+        )
+
+        scores = get_scores(
+            pred=prediction.flatten(1),
+            gt=dataset.label.detach().cpu().flatten(1),
+            cfg=cfg
+        )
+
+
     results.append(
         {
             'scores': scores,
-            'prediction': prediction.clone(),
-            'uncertainty_maps': uncertainty_maps,
-            'uncertainty_per_class_maps': uncertainty_per_class_maps,
-            'num_annotations' : dataset.annotations.detach().cpu().sum().item(),
-            'num_annotated_voxels' : dataset.annotations.detach().cpu().any(dim=0).sum().item()
+            # 'prediction': prediction.clone(),
+            # 'uncertainty_maps': uncertainty_maps,
+            # 'uncertainty_per_class_maps': uncertainty_per_class_maps,
+            # 'num_annotations' : dataset.annotations.detach().cpu().sum().item(),
+            # 'num_annotated_voxels' : dataset.annotations.detach().cpu().any(dim=0).sum().item()
         }
     )
 
-    print(results[0]['scores'])
-    print(results[0]['num_annotations'])
-    print(results[0]['num_annotated_voxels'])
+    # print(results[0]['scores'])
+    # print(results[0]['num_annotations'])
+    # print(results[0]['num_annotated_voxels'])
 
     # cyclic process of user interaction
     for i in tqdm(range(cfg.num_interactions), desc='User interaction', unit='iteration'):
+
+
         u_annots, _ = dataset.user.refinement_annotation(
             prediction=prediction,
-            #self.label.detach().cpu(),
             annotation_mask=dataset.annotations.detach().cpu(),
             uncertainty_map=uncertainty_per_class_maps['entropy'],
             n_samples=200,
@@ -791,43 +858,42 @@ def simulate_user_interaction(
             seed=42,
             inverse_class_freq=False
         )
-        #print(u_annots)
         dataset.update_annotation(u_annots)
-
-        if cfg.novelty:
-            n_annots, _ = dataset.user.refinement_annotation(
-            prediction=prediction,
-            #self.label.detach().cpu(),
-            annotation_mask=dataset.annotations.detach().cpu(),
-            uncertainty_map=uncertainty_maps['feature-distance'],
-            n_samples=200,
-            mode='single_slice',
-            seed=42,
-            inverse_class_freq=False
-            )
-            dataset.update_annotation(n_annots)
         
-        scores, prediction, uncertainty_maps, uncertainty_per_class_maps = evaluate_RF(
-            dataset, 
-            features, 
-            cfg,
-            uncertainty_measures=[
-            # 'ground-truth',
-             'entropy',
-             'feature-distance',
-            ]
+        scores, prediction, uncertainty_maps, uncertainty_per_class_maps, t = evaluate_RF(
+            dataset=dataset, 
+            features=features, 
+            cfg=cfg,
+            uncertainty_measures=uncertainty_measures
         )
+
+        # add background bias
+        if cfg.background_bias:
+            background_class = torch.zeros(len(cfg.data.labels))
+            background_class[0] = 1
+            prediction = add_background_bias(
+                prediction=prediction,
+                anomaly_score_map=uncertainty_maps['feature-distance'],
+                background_class=background_class,
+                threshold=t
+            )
+            scores = get_scores(
+                pred=prediction.flatten(1),
+                gt=dataset.label.detach().cpu().flatten(1),
+                cfg=cfg
+            )
 
         results.append(
             {
                 'scores': scores,
-                'prediction': prediction.clone(),
-                'uncertainty_maps': uncertainty_maps,
-                'uncertainty_per_class_maps': uncertainty_per_class_maps,
-                'num_annotations' : dataset.annotations.detach().cpu().sum().item(),
-                'num_annotated_voxels' : dataset.annotations.detach().cpu().any(dim=0).sum().item()
+                # 'prediction': prediction.clone(),
+                # 'uncertainty_maps': uncertainty_maps,
+                # 'uncertainty_per_class_maps': uncertainty_per_class_maps,
+                # 'num_annotations' : dataset.annotations.detach().cpu().sum().item(),
+                # 'num_annotated_voxels' : dataset.annotations.detach().cpu().any(dim=0).sum().item()
             }
         )
 
-    for r in results:
-        print(r['scores']['Avg_f1_tracts']) 
+    print(results)
+    # for r in results:
+    #     print(r['scores']['Avg_f1_tracts']) 
