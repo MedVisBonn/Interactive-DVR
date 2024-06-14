@@ -322,12 +322,29 @@ class FeatureExtractor(nn.Module):
                 _ = self.model(in_)
                 
         return self._features
+    
+### Background Bias
+def add_background_bias(
+    prediction: Tensor,
+    anomaly_score_map: Tensor,
+    background_class: Tensor,
+    threshold: float
+):
+    # Check inputs
+    assert prediction.shape[1:] == anomaly_score_map.shape
+    assert len(prediction.shape) == 4
+    assert len(background_class) == prediction.shape[0], f"{background_class.shape} != {prediction.shape[0]}"
+    assert threshold >= 0 and threshold <= 1
+
+    # Add background bias
+    prediction[:, anomaly_score_map>threshold] = background_class[:, None].float()
+
+    return prediction
 
 
-### Uncertainty measures
 ### Uncertainty measures
 def calc_binary_entropy(prob):
-    eps = 1e-5
+    eps = 1e-7
     
     #Edge Cases
     prob = torch.clamp(prob, eps, 1-eps)
@@ -335,7 +352,11 @@ def calc_binary_entropy(prob):
     return -(prob*torch.log2(prob) + (1-prob)*torch.log2(1-prob))
 
 
-def uncertainty_entropy(Y_predicted_prob, n_classes, test_mask):
+def uncertainty_entropy(
+    Y_predicted_prob, 
+    n_classes, 
+    test_mask
+):
     
     entropy = calc_binary_entropy(Y_predicted_prob)
     entropy_map = torch.zeros((145,145,145, n_classes))
@@ -344,8 +365,11 @@ def uncertainty_entropy(Y_predicted_prob, n_classes, test_mask):
     return mean_entropy_map, entropy_map
 
 
-def uncertainty_sd(train_label, test_mask, n_classes):
-
+def uncertainty_sd(
+    train_label, 
+    test_mask, 
+    n_classes
+):
     train_label_tensor = torch.from_numpy(train_label)
     annotated_voxels = torch.any(train_label_tensor, dim=-1)
     # per class
