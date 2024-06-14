@@ -218,8 +218,13 @@ class UserModel:
         weights = torch.abs(slc).max(dim=0).values * ground_truth_slice # 5 x 145 x 145 , neue Version
 
         # print(weights.shape, (weights>0).sum(axis=(1,2)))
-        if self.guidance == 'ground_truth':
+        if self.guidance == 'uniform':
+            pass
+        elif self.guidance == 'log':
             weights = weights ** 2
+        else:
+            raise ValueError('Invalid guidance. Choose between "uniform" and "log".')
+
         weights = weights / (weights>0).sum(axis=(1,2)).reshape(-1,1,1)
         # iterate over classes, sampling for each independently
 
@@ -237,15 +242,11 @@ class UserModel:
                 # 1D coordinates for samples from weight matrix
                 #print(num_samples)
                 # print(weight.shape)
-                if self.guidance == 'ground_truth':
-                    index_list = list(sampler(weight.flatten(), num_samples=num_samples, replacement=False))
-                elif self.guidance == 'estimated':
+
+                if self.guidance == 'top_k':
                     index_list = list(weight.flatten().sort(descending=True).indices[:num_samples])
-                    # n_candidates = weight[weight > 0].flatten().shape[0]
-                    # index_list = np.unique(((np.linspace(0, 1, num=num_samples)**4) * (n_candidates-1)).astype(int))
-                
                 else:
-                    raise ValueError('Invalid guidance. Choose between "ground_truth" and "estimated".')
+                    index_list = list(sampler(weight.flatten(), num_samples=num_samples, replacement=False))
                     
                 # index_list = list(sampler(weight.flatten(), num_samples=num_samples, replacement=False))
                 # print(
@@ -597,7 +598,7 @@ class UserModel:
                 interaction_map[selection] = torch.bitwise_or(interaction_map[selection], brushed_mask)
                 data_location.append((axis[0], indices[0]))
                 
-        return interaction_map.float() , selection
+        return interaction_map.float(), selection
 
     
     def random_refinement_annotation(
