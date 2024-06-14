@@ -726,15 +726,84 @@ def simulate_user_interaction(
     features: Tensor,
     cfg
 ):
-    
+
+    results = []
+
+    # results of initial annotation
     scores, prediction, uncertainty_maps, uncertainty_per_class_maps = evaluate_RF(
         dataset, 
         features, 
         cfg,
         uncertainty_measures=[
         # 'ground-truth',
-        # 'entropy',
-        # 'feature-distance',
+         'entropy',
+         'feature-distance',
         ]
     )
-    print(scores)
+    results.append(
+        {
+            'scores': scores,
+            'prediction': prediction.clone(),
+            'uncertainty_maps': uncertainty_maps,
+            'uncertainty_per_class_maps': uncertainty_per_class_maps,
+            'num_annotations' : dataset.annotations.detach().cpu().sum().item(),
+            'num_annotated_voxels' : dataset.annotations.detach().cpu().any(dim=0).sum().item()
+        }
+    )
+
+    print(results[0]['scores'])
+    print(results[0]['num_annotations'])
+    print(results[0]['num_annotated_voxels'])
+
+    # cyclic process of user interaction
+    for i in tqdm(range(cfg.num_interactions), desc='User interaction', unit='iteration'):
+        u_annots, _ = dataset.user.refinement_annotation(
+            prediction=prediction,
+            #self.label.detach().cpu(),
+            annotation_mask=dataset.annotations.detach().cpu(),
+            uncertainty_map=uncertainty_per_class_maps['entropy'],
+            n_samples=200,
+            mode='per_class',
+            seed=42,
+            inverse_class_freq=False
+        )
+        #print(u_annots)
+        dataset.update_annotation(u_annots)
+
+        if cfg.novelty:
+            n_annots, _ = dataset.user.refinement_annotation(
+            prediction=prediction,
+            #self.label.detach().cpu(),
+            annotation_mask=dataset.annotations.detach().cpu(),
+            uncertainty_map=uncertainty_maps['feature-distance'],
+            n_samples=200,
+            mode='single_slice',
+            seed=42,
+            inverse_class_freq=False
+            )
+            dataset.update_annotation(n_annots)
+        
+        scores, prediction, uncertainty_maps, uncertainty_per_class_maps = evaluate_RF(
+            dataset, 
+            features, 
+            cfg,
+            uncertainty_measures=[
+            # 'ground-truth',
+             'entropy',
+             'feature-distance',
+            ]
+        )
+
+        results.append(
+            {
+                'scores': scores,
+                'prediction': prediction.clone(),
+                'uncertainty_maps': uncertainty_maps,
+                'uncertainty_per_class_maps': uncertainty_per_class_maps,
+                'num_annotations' : dataset.annotations.detach().cpu().sum().item(),
+                'num_annotated_voxels' : dataset.annotations.detach().cpu().any(dim=0).sum().item()
+            }
+        )
+
+    for r in results:
+        print(r['scores']['Avg_f1_tracts']) 

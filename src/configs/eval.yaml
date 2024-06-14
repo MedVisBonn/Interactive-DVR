@@ -9,7 +9,7 @@ wandb:
 # DATA
 data:
   data_dir: '../../../../../data/hcp'
-  subject: 784565
+  subject: 599469 #784565 
   axis: coronal
   labels: [
         "Other", 
@@ -50,3 +50,4 @@ init_mode: 'per_class'  # 'three_slices'
 init_voxels: 200
 refinement_voxels: 200
 num_interactions: 10
+novelty: True
