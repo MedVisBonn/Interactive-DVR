@@ -36,6 +36,7 @@ def main(
     features = get_features(
         model=model,
         dataset=dataset,
+        tta=cfg.tta,
         verbose=verbose
     )
 

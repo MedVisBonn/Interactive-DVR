@@ -36,6 +36,27 @@ def debugging(message):
 
 
 
+def get_tta_features(
+    dataset,
+    model,
+    verbose,
+    var = 0.005,
+    n_features = 4
+):  
+    if verbose:
+        print("Extracting TTA features...")
+    input_ = copy.deepcopy(dataset.data_in)
+    feature_list = []
+    for i in range(n_features):
+        dataset.data_in = input_ + torch.randn_like(dataset.data_in) * np.sqrt(var)
+        extractor = FeatureExtractor(model, layers=['encoder'])
+        hooked_results = extractor(dataset)
+        features = hooked_results['encoder']
+        features = features.permute(0,2,3,1).numpy()
+        feature_list.append(features)
+    dataset.data_in = input_
+    return feature_list
+
 
 def get_features(
     model: nn.Module, 
@@ -49,7 +70,9 @@ def get_features(
     extractor = FeatureExtractor(model, layers=[f_layer])
     hooked_results = extractor(dataset)
     features = hooked_results[f_layer]
-    features = features.permute(0,2,3,1).numpy()
+    features = [features.permute(0,2,3,1).numpy()]
+    if tta:
+        features = features + get_tta_features(dataset, model, verbose)
     if verbose:
         print("Done.\n")
     return features
@@ -491,11 +514,12 @@ def evaluate_RF(
     train_label = dataset.annotations.detach().cpu().permute(1,2,3,0).numpy()
     test_label  = dataset.label.detach().cpu().permute(1,2,3,0).numpy()
     
-    if tta:
-        f = np.stack(features, axis=0)  # (n_tta, 145, 145, 145, 44)
-        train_m = np.repeat(train_mask[np.newaxis, ...], len(features), axis=0)  # (n_tta, 145, 145, 145)
-        test_m = np.repeat(test_mask[np.newaxis, ...], len(features), axis=0)  # (n_tta, 145, 145, 145)
-        train_l = np.repeat(train_label[np.newaxis, ...], len(features), axis=0)  # (n_tta, 145, 145, 145, 5)
+    if cfg.tta:
+        f = np.stack(features[1:], axis=0)  # (n_tta, 145, 145, 145, 44)
+        num_tta = len(features) - 1
+        train_m = np.repeat(train_mask[np.newaxis, ...], num_tta, axis=0)  # (n_tta, 145, 145, 145)
+        test_m = np.repeat(test_mask[np.newaxis, ...], num_tta, axis=0)  # (n_tta, 145, 145, 145)
+        train_l = np.repeat(train_label[np.newaxis, ...], num_tta, axis=0)  # (n_tta, 145, 145, 145, 5)
 
         X_train = f.reshape((-1, f.shape[-1]))[train_m.reshape(-1) == 1]    # (n_tta*train_voxels, 44)
         X_test = f.reshape((-1, f.shape[-1]))[test_m.reshape(-1) == 1]    # (n_tta*844350, 44)
@@ -503,8 +527,8 @@ def evaluate_RF(
     
     else:
         # Input - Mask voxels that are not labelled before flattening the input
-        X_train = features.reshape((-1, features.shape[-1]))[train_mask.reshape(-1) == 1]
-        X_test  = features.reshape((-1, features.shape[-1]))[test_mask.reshape(-1)  == 1]
+        X_train = features[0].reshape((-1, features[0].shape[-1]))[train_mask.reshape(-1) == 1]
+        X_test  = features[0].reshape((-1, features[0].shape[-1]))[test_mask.reshape(-1)  == 1]
         # Target - Same as above. Mask before flattening
         Y_train = train_label.reshape((-1, train_label.shape[-1]))[train_mask.reshape(-1) == 1]
 
@@ -526,8 +550,8 @@ def evaluate_RF(
     # predict labels in test mask
     predicted_prob    = clf.predict_proba(X_test)
     Y_predicted_prob  = torch.tensor(np.array([p[:, 1] for p in predicted_prob])).T
-    if tta:
-        Y_predicted_prob = Y_predicted_prob.reshape((len(features), 844350, 5)).mean(axis=0)
+    if cfg.tta:
+        Y_predicted_prob = Y_predicted_prob.reshape((num_tta, Y_test.shape[0], n_classes)).mean(axis=0)
     Y_predicted_label = (Y_predicted_prob > 0.5)*1
 
 
@@ -569,7 +593,7 @@ def evaluate_RF(
             case 'spatial-distance':
                 uncertainty_map, uncertainty_per_class = uncertainty_sd(train_label, test_mask, n_classes)
             case 'feature-distance':
-                uncertainty_map, uncertainty_per_class, t = uncertainty_fd(train_label, features, test_mask, n_classes)
+                uncertainty_map, uncertainty_per_class, t = uncertainty_fd(train_label, features[0], test_mask, n_classes)
             case _:
                 raise ValueError(f"Uncertainty measure {measure} not implemented")
 

@@ -53,3 +53,4 @@ refinement_voxels: 100
 num_interactions: 0
 uncertainty_measure: 'entropy'
 background_bias: True
+tta: True
