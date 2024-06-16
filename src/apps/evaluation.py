@@ -68,7 +68,7 @@ def main(
         uncertainty_measure=cfg.uncertainty_measure, 
         background_bias=cfg.background_bias, 
         feature=cfg.feature, 
-        save_dir=f'{cfg.root_dir}/{cfg.save_dir}'
+        save_dir=f'{cfg.out_dir}/{cfg.save_dir}'
     )
 
     if verbose:

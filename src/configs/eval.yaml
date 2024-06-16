@@ -4,6 +4,7 @@ verbose: True
 log: True
 rank: 0
 root_dir: '../..'
+out_dir: '../../../../out'
 save_dir: "results/data"
 wandb:
   project: 'VCBM24'
