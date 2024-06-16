@@ -1,11 +1,14 @@
 import os, sys
 import hydra
 from omegaconf import OmegaConf
+from time import time
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
 from dataset import get_eval_dataset
 from model import get_model
-from utils import get_features, simulate_user_interaction
+from utils import get_features, simulate_user_interaction, save_results
+
+
 
 @hydra.main(
     config_path='../configs', 
@@ -16,6 +19,9 @@ def main(
     cfg
 ):
     verbose = cfg.verbose
+    if verbose:
+        print("\n --- Evaluation --- \n")
+        start = time()
 
     # get dataset
     dataset = get_eval_dataset(
@@ -36,7 +42,7 @@ def main(
     features = get_features(
         model=model,
         dataset=dataset,
-        tta=cfg.tta,
+        feature=cfg.feature,
         verbose=verbose
     )
 
@@ -55,7 +61,18 @@ def main(
         verbose=verbose
     )
 
+    # save results
+    save_results(
+        results=results, 
+        subject_id=cfg.data.subject, 
+        uncertainty_measure=cfg.uncertainty_measure, 
+        background_bias=cfg.background_bias, 
+        feature=cfg.feature, 
+        save_dir=f'{cfg.root_dir}/{cfg.save_dir}'
+    )
 
+    if verbose:
+        print(f"Total time: {(time() - start) / 60:.2f} min")
 
 
 if __name__ == "__main__":

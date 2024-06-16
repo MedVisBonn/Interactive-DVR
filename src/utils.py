@@ -26,6 +26,7 @@ from datetime import date
 from os import makedirs, path
 from copy import deepcopy
 from tqdm.auto import tqdm
+import pandas as pd
 
 def debugging(message):
     print("".center(60, "#"))
@@ -33,6 +34,42 @@ def debugging(message):
     print("".center(60, "#"))
     print("\n")
     print("\n")
+
+
+
+def save_results(
+    results: List[Dict],
+    subject_id: str,
+    uncertainty_measure: str,
+    background_bias: bool,
+    feature: bool,
+    save_dir: str
+):
+    # Initialize an empty list to store the structured data
+    data = []
+
+    # Iterate through the list to process each result
+    for iteration, result in enumerate(results):
+        scores = result['scores']
+        for key, value in scores.items():
+            parts = key.split('_')
+            region = parts[0]
+            score_type = parts[1] if len(parts) == 2 else parts[1] + "_" + parts[2] # Handle the _tracts case
+            data.append({
+                'iteration': iteration,
+                'region': region,
+                'score_type': score_type.replace('_tracts', ''),
+                'score': value.item(),  # Convert numpy array to Python scalar
+                'subject_id': subject_id,
+                'uncertainty_measure': uncertainty_measure, 
+                'background_bias': background_bias,
+                'feature': feature                        
+            })
+
+    # Convert the structured data into a pandas DataFrame
+    df = pd.DataFrame(data)
+    save_name = f"{subject_id}_{uncertainty_measure}_bb-{background_bias}_{feature}.csv"
+    df.to_csv(f'{save_dir}/{save_name}', index=False)
 
 
 
@@ -61,7 +98,7 @@ def get_tta_features(
 def get_features(
     model: nn.Module, 
     dataset: Dataset,
-    tta: bool = False,
+    feature: str = 'default',
     verbose: bool = False
 ):  
     if verbose:
@@ -71,7 +108,7 @@ def get_features(
     hooked_results = extractor(dataset)
     features = hooked_results[f_layer]
     features = [features.permute(0,2,3,1).numpy()]
-    if tta:
+    if feature == 'tta':
         features = features + get_tta_features(dataset, model, verbose)
     if verbose:
         print("Done.\n")
@@ -514,7 +551,7 @@ def evaluate_RF(
     train_label = dataset.annotations.detach().cpu().permute(1,2,3,0).numpy()
     test_label  = dataset.label.detach().cpu().permute(1,2,3,0).numpy()
     
-    if cfg.tta:
+    if cfg.feature=='tta':
         f = np.stack(features[1:], axis=0)  # (n_tta, 145, 145, 145, 44)
         num_tta = len(features) - 1
         train_m = np.repeat(train_mask[np.newaxis, ...], num_tta, axis=0)  # (n_tta, 145, 145, 145)
@@ -550,7 +587,8 @@ def evaluate_RF(
     # predict labels in test mask
     predicted_prob    = clf.predict_proba(X_test)
     Y_predicted_prob  = torch.tensor(np.array([p[:, 1] for p in predicted_prob])).T
-    if cfg.tta:
+    n_classes = len(cfg['data']['labels'])
+    if cfg.feature=='tta':
         Y_predicted_prob = Y_predicted_prob.reshape((num_tta, Y_test.shape[0], n_classes)).mean(axis=0)
     Y_predicted_label = (Y_predicted_prob > 0.5)*1
 
@@ -559,7 +597,6 @@ def evaluate_RF(
                 ####### Save Prediction #######
                 ###############################
                 
-    n_classes = len(cfg['data']['labels'])
     prediction = torch.zeros((145,145,145, n_classes))
     prediction.view(-1, n_classes)[test_mask.reshape(-1)  == 1] = Y_predicted_label.float()
 
@@ -918,6 +955,6 @@ def simulate_user_interaction(
             }
         )
 
-    print(results)
+    return results
     # for r in results:
     #     print(r['scores']['Avg_f1_tracts']) 

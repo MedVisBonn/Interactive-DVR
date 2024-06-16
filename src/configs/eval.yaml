@@ -4,6 +4,7 @@ verbose: True
 log: True
 rank: 0
 root_dir: '../..'
+save_dir: "results/data"
 wandb:
   project: 'VCBM24'
 
@@ -53,4 +54,4 @@ refinement_voxels: 100
 num_interactions: 0
 uncertainty_measure: 'entropy'
 background_bias: True
-tta: True
+feature: 'tta'
