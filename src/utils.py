@@ -80,6 +80,23 @@ def save_results(
     df.to_csv(f'{save_dir}/{save_name}', index=False)
 
 
+def get_ttd_features(
+    dataset,
+    model,
+    verbose,
+    n_features = 4
+):
+    if verbose:
+        print("Extracting TTD features...")
+    feature_list = []
+    for i in range(n_features):
+        extractor = FeatureExtractor(model, layers=['encoder'])
+        hooked_results = extractor(dataset)
+        features = hooked_results['encoder']
+        features = features.permute(0,2,3,1).numpy()
+        feature_list.append(features)
+    return feature_list
+
 
 def get_tta_features(
     dataset,
@@ -118,6 +135,8 @@ def get_features(
     features = [features.permute(0,2,3,1).numpy()]
     if feature == 'tta':
         features = features + get_tta_features(dataset, model, verbose)
+    elif feature == 'ttd':
+        features = features + get_ttd_features(dataset, model, verbose)
     if verbose:
         print("Done.\n")
     return features
