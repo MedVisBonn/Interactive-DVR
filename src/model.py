@@ -56,7 +56,7 @@ class DualBranchAE(nn.Module):
             self.encoder = ZeroLinkEncoder(in_size, dropout, dropout_rate)
 
         if decoder == 'reconstruction':
-            self.decoder = ReconstructionDecoder(out_channel=recon_channel, dropout=dropout, dropout_rate=dropout_rate)
+            self.decoder = ReconstructionDecoder(out_channel=recon_channel)
 
         elif decoder == 'segmentation':
             self.decoder = SegmentationDecoder(n_classes=n_classes, thresholds=thresholds)
