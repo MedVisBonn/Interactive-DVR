@@ -928,7 +928,7 @@ def simulate_user_interaction(
         u_annots, _ = dataset.user.refinement_annotation(
             prediction=prediction,
             annotation_mask=dataset.annotations.detach().cpu(),
-            uncertainty_map=uncertainty_per_class_maps[uncertainty_measure],
+            uncertainty_map=uncertainty_per_class_maps[uncertainty_measure] if uncertainty_measure != 'ground-truth' else None,
             n_samples=200,
             mode='per_class',
             seed=42,
