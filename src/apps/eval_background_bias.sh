@@ -12,7 +12,7 @@ while getopts "s:" opt; do
 done
 
 # General
-POSTFIX='_dropout-model'
+POSTFIX=''
 CUDA_DEVICE=6
 VERBOSE=true
 # SUBJECTS=('987983' '709551' '677968' '792564' '782561' '770352' '729557' '705341' '917255' '702133' '877168' '679568' '992774' '958976' '765056' '771354')
@@ -41,7 +41,7 @@ for subject in "${SUBJECTS[@]}"; do
     for bb in "${BACKGROUND_BIAS[@]}"; do
 
       CUDA_VISIBLE_DEVICES=$CUDA_DEVICE python evaluation.py \
-          -cn eval_background_bias_tmp \
+          -cn eval_background_bias \
           ++verbose="$VERBOSE" \
           ++postfix="$POSTFIX" \
           ++data.subject="$subject" \

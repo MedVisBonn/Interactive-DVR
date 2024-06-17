@@ -41,7 +41,7 @@ class DualBranchAE(nn.Module):
         n_classes=5, 
         thresholds='learned',
         dropout=False,
-        dropout_rate=0.2,
+        dropout_rate=0.05,
         recon_channel=288
     ):
         super().__init__()

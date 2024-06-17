@@ -2,9 +2,9 @@
 #!/bin/bash
 
 # General
-NAME='ae_feature-extractor_dropout'
+NAME='ae_feature-extractor_dropout005'
 LOG=true
-CUDA_DEVICE=5
+CUDA_DEVICE=4
 TRAIN=true
 
 # Model
