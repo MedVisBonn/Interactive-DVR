@@ -29,6 +29,8 @@ def get_model(
             print("Done. Returning model only.\n")
         return model
 
+
+
 class DualBranchAE(nn.Module):
     def __init__(
         self, 

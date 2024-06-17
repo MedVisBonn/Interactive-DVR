@@ -907,13 +907,15 @@ def simulate_user_interaction(
     # print(results[0]['num_annotated_voxels'])
 
     # cyclic process of user interaction
+    uncertainty_measure = cfg.uncertainty_measure[0]
+    assert uncertainty_measure != 'feature-distance', "Wrong order in uncertainty measures"
     for i in tqdm(range(cfg.num_interactions), desc='User interaction', unit='iteration'):
 
 
         u_annots, _ = dataset.user.refinement_annotation(
             prediction=prediction,
             annotation_mask=dataset.annotations.detach().cpu(),
-            uncertainty_map=uncertainty_per_class_maps['entropy'],
+            uncertainty_map=uncertainty_per_class_maps[uncertainty_measure],
             n_samples=200,
             mode='per_class',
             seed=42,
