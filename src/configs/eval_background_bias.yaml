@@ -1,0 +1,71 @@
+# general
+name: 'none'
+verbose: True
+log: True
+rank: 0
+root_dir: '../..'
+out_dir: '../../../../out'
+save_dir: "results/data"
+postfix: ''
+wandb:
+  project: 'VCBM24'
+
+# DATA
+data:
+  data_dir: '../../../../../data/hcp'
+  subject: 599469 #784565 
+  axis: coronal
+  labelset: 'set1'
+  labels: 
+    set1: [
+        "Other", 
+        "CG", # cingulum
+        "CST", 
+        "FX", 
+        "CC"  # corpus callosum
+      ]
+    set2: [
+        "Other", 
+        "IFO_left", 
+        "IFO_right", 
+        "ILF_left",
+        "ILF_right", 
+        "SLF_left", 
+        "SLF_right"
+      ]
+  # labels: [
+  #       "Other", 
+  #       "IFO_left", 
+  #       "IFO_right", 
+  #       "ILF_left",
+  #       "ILF_right", 
+  #       "SLF_left", 
+  #       "SLF_right"
+  #   ]
+
+# MODEL
+model: 
+  arch: 'ae'
+  encoder: 'zero'
+  decoder: 'reconstruction'
+  spatial_dim: 145
+  dropout: false
+  state_dict: 'ae_feature-extractor_all_old.pt'
+
+# RF
+min_samples_leaf: 8
+
+# USER MODEL
+brush_sizes: [1]
+slice_selection: 'max'
+voxel_selection: 'max'
+guidance: 'log'
+
+# EVALUATION
+init_mode: 'per_class'  # 'three_slices'
+init_voxels: 100
+refinement_voxels: 100
+num_interactions: 0
+uncertainty_measure: 'entropy'
+background_bias: True
+feature: 'tta'
