@@ -17,6 +17,7 @@ model:
   arch: 'ae'
   encoder: 'zero'
   decoder: 'reconstruction'
+  dropout: false
   spatial_dim: 145
 
 # TRAINING

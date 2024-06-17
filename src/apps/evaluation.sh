@@ -16,6 +16,13 @@ UNCERTAINTY_MEASURE='entropy'
 BACKGROUND_BIAS=true
 FEATURE='tta'
 
+if [ "$FEATURE" == "ttd" ]; then
+  DROPOUT=true
+else
+  DROPOUT=false
+fi
+
+
 
 CUDA_VISIBLE_DEVICES=$CUDA_DEVICE python evaluation.py \
     -cn eval \
@@ -23,6 +30,7 @@ CUDA_VISIBLE_DEVICES=$CUDA_DEVICE python evaluation.py \
     ++init_voxels="$INIT_VOXELS" \
     ++refinement_voxels="$REFINEMENT_VOXELS" \
     ++num_interactions=$NUM_INTERACTIONS \
+    ++model.dropout=$DROPOUT \
     ++uncertainty_measure="$UNCERTAINTY_MEASURE" \
     ++background_bias="$BACKGROUND_BIAS" \
     ++feature="$FEATURE"

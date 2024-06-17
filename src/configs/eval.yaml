@@ -37,6 +37,7 @@ model:
   encoder: 'zero'
   decoder: 'reconstruction'
   spatial_dim: 145
+  dropout: false
   state_dict: 'ae_feature-extractor_all_old.pt'
 
 # RF

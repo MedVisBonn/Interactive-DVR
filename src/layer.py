@@ -9,14 +9,23 @@ from typing import Dict, Iterable, Callable, Generator, Union
 
 
 class LocalModule(nn.Module):
-    def __init__(self, in_channels, out_channels, size=None):
+    def __init__(self, in_channels, out_channels, size=None, dropout=False, dropout_rate=0.2):
         super().__init__()
         
         self.size = size
-        self.layer = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, 1, stride=1, padding=0, bias=True),
-            nn.BatchNorm2d(out_channels),
-            nn.PReLU(out_channels))
+        if dropout:
+            self.layer = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, 1, stride=1, padding=0, bias=True),
+                nn.BatchNorm2d(out_channels),
+                nn.PReLU(out_channels),
+                nn.Dropout(dropout_rate)
+                )
+        else:
+            self.layer = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, 1, stride=1, padding=0, bias=True),
+                nn.BatchNorm2d(out_channels),
+                nn.PReLU(out_channels)
+                )
         
     def forward(self, x: Tensor):
         x_out = self.layer(x)
@@ -30,14 +39,23 @@ class LocalModule(nn.Module):
         
         
 class RegionalModule(nn.Module):
-    def __init__(self, in_channels, out_channels, size=None):
+    def __init__(self, in_channels, out_channels, size=None, dropout=False, dropout_rate=0.2):
         super().__init__()
         
         self.size = size
-        self.layer = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=5, stride=2, padding=2),
-            nn.BatchNorm2d(out_channels),
-            nn.PReLU(out_channels))    
+        if dropout:
+            self.layer = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, kernel_size=5, stride=2, padding=2),
+                nn.BatchNorm2d(out_channels),
+                nn.PReLU(out_channels),
+                nn.Dropout(dropout_rate)
+                )
+        else:
+            self.layer = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, kernel_size=5, stride=2, padding=2),
+                nn.BatchNorm2d(out_channels),
+                nn.PReLU(out_channels),
+                )    
     
     def forward(self, x: Tensor):
         x_out  = self.layer(x)
@@ -51,24 +69,24 @@ class RegionalModule(nn.Module):
     
     
 class EncodingLayer(nn.Module):
-    def __init__(self, in_channels, out_channels, size_high=None, size_low=None, link=None):
+    def __init__(self, in_channels, out_channels, size_high=None, size_low=None, link=None, dropout=False, dropout_rate=0.2):
         super().__init__()
         self.link = link
 
         if link == 'double':
-            self.local    = LocalModule(in_channels, out_channels, size_low)
+            self.local    = LocalModule(in_channels, out_channels, size_low, dropout=dropout, dropout_rate=dropout_rate)
             self.local_pre_conv = nn.Conv2d(out_channels, out_channels, 1)
-            self.regional = RegionalModule(in_channels, out_channels, size_high)
+            self.regional = RegionalModule(in_channels, out_channels, size_high, dropout=dropout, dropout_rate=dropout_rate)
             self.regional_pre_conv = nn.Conv2d(out_channels, out_channels, 1)
             
         if link == 'single':
-            self.local    = LocalModule(in_channels, out_channels, size_low)
+            self.local    = LocalModule(in_channels, out_channels, size_low, dropout=dropout, dropout_rate=dropout_rate)
             self.regional_pre_conv = nn.Conv2d(out_channels, out_channels, 1)
-            self.regional = RegionalModule(in_channels, out_channels, size_high)
+            self.regional = RegionalModule(in_channels, out_channels, size_high, dropout=dropout, dropout_rate=dropout_rate)
             
         else:
-            self.local    = LocalModule(in_channels, out_channels, size_low)
-            self.regional = RegionalModule(in_channels, out_channels, size_high)
+            self.local    = LocalModule(in_channels, out_channels, size_low, dropout=dropout, dropout_rate=dropout_rate)
+            self.regional = RegionalModule(in_channels, out_channels, size_high, dropout=dropout, dropout_rate=dropout_rate)
 
 
     def forward(self, x_local: Tensor, x_regional=None):
@@ -92,15 +110,15 @@ class EncodingLayer(nn.Module):
         
         
 class ZeroLinkEncoder(nn.Module):
-    def __init__(self, size_high):
+    def __init__(self, size_high, dropout=False, dropout_rate=0.2):
         super().__init__()
         self.size = size_high
         
-        self.layer0 = EncodingLayer(288, 88)
-        self.layer1 = EncodingLayer( 88, 44)
-        self.layer2 = EncodingLayer( 44, 22)
-        self.layer3 = EncodingLayer( 22, 22)
-        self.layer4 = EncodingLayer( 22, 22)
+        self.layer0 = EncodingLayer(288, 88, dropout=dropout, dropout_rate=dropout_rate)
+        self.layer1 = EncodingLayer( 88, 44, dropout=dropout, dropout_rate=dropout_rate)
+        self.layer2 = EncodingLayer( 44, 22, dropout=dropout, dropout_rate=dropout_rate)
+        self.layer3 = EncodingLayer( 22, 22, dropout=dropout, dropout_rate=dropout_rate)
+        self.layer4 = EncodingLayer( 22, 22, dropout=False, dropout_rate=dropout_rate)
                 
     def forward(self, x: Tensor):
         local, regional = self.layer0(x)
@@ -115,18 +133,18 @@ class ZeroLinkEncoder(nn.Module):
     
     
 class SingleLinkEncoder(nn.Module):
-    def __init__(self, size_high):
+    def __init__(self, size_high, dropout=False, dropout_rate=0.2):
         super().__init__()
         
-        self.layer0 = EncodingLayer(288, 88, size_high, link='single')        
-        self.layer1 = EncodingLayer(88, 44, size_high, link='single')
-        self.layer2 = EncodingLayer(44, 22, size_high, link='single')
-        self.layer3 = EncodingLayer(22, 22, size_high, link='single')
+        self.layer0 = EncodingLayer(288, 88, size_high, link='single', dropout=dropout, dropout_rate=dropout_rate)        
+        self.layer1 = EncodingLayer(88, 44, size_high, link='single', dropout=dropout, dropout_rate=dropout_rate)
+        self.layer2 = EncodingLayer(44, 22, size_high, link='single', dropout=dropout, dropout_rate=dropout_rate)
+        self.layer3 = EncodingLayer(22, 22, size_high, link='single', dropout=dropout, dropout_rate=dropout_rate)
         
-        self.local4            = LocalModule(22, 22)
-        self.regional4         = RegionalModule(22, 22, size_high)
+        self.local4            = LocalModule(22, 22, dropout=dropout, dropout_rate=dropout_rate)
+        self.regional4         = RegionalModule(22, 22, size_high, dropout=dropout, dropout_rate=dropout_rate)
         self.regional4_pre_conv = nn.Conv2d(22, 22, 1)
-        self.final_local_layer = LocalModule(22, 44, size_high)
+        self.final_local_layer = LocalModule(22, 44, size_high, dropout=False, dropout_rate=dropout_rate)
 
     
     def forward(self, x):
@@ -145,16 +163,16 @@ class SingleLinkEncoder(nn.Module):
         
         
 class DualLinkEncoder(nn.Module):
-    def __init__(self, size_high):
+    def __init__(self, size_high, dropout=False, dropout_rate=0.2):
         super().__init__()
         size_low = [ceil(size_high/(2**i)) for i in range(1, 5)]
         
-        self.layer0    = EncodingLayer(288, 88, size_high, size_low[0], link='double')
-        self.layer1    = EncodingLayer(88, 44, size_high, size_low[1], link='double')
-        self.layer2    = EncodingLayer(44, 22, size_high, size_low[2], link='double')
-        self.layer3    = EncodingLayer(22, 22, size_high, size_low[3], link='double')
-        self.local4    = LocalModule(22, 22, size_high)
-        self.regional4 = RegionalModule(22, 22, size_high)
+        self.layer0    = EncodingLayer(288, 88, size_high, size_low[0], link='double', dropout=dropout, dropout_rate=dropout_rate)
+        self.layer1    = EncodingLayer(88, 44, size_high, size_low[1], link='double', dropout=dropout, dropout_rate=dropout_rate)
+        self.layer2    = EncodingLayer(44, 22, size_high, size_low[2], link='double', dropout=dropout, dropout_rate=dropout_rate)
+        self.layer3    = EncodingLayer(22, 22, size_high, size_low[3], link='double', dropout=dropout, dropout_rate=dropout_rate)
+        self.local4    = LocalModule(22, 22, size_high, dropout=False, dropout_rate=dropout_rate)
+        self.regional4 = RegionalModule(22, 22, size_high, dropout=False, dropout_rate=dropout_rate)
         #self.regional4_pre_conv = nn.Conv2d(22, 22, 1)
         #self.final_local_layer = LocalModule(44, 44, size_high)
         

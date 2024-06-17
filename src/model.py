@@ -10,11 +10,12 @@ def get_model(
     verbose: bool = False
 ):
     if verbose:
-        print(f'Loading model: {cfg.model.encoder} -> {cfg.model.decoder} with spatial dim {cfg.model.spatial_dim}')
+        print(f'Loading model: {cfg.model.encoder} -> {cfg.model.decoder} with spatial dim {cfg.model.spatial_dim} and Dropout {cfg.model.dropout}\n')
     model = DualBranchAE(
         encoder=cfg.model.encoder,
         decoder=cfg.model.decoder,
         in_size=cfg.model.spatial_dim,
+        dropout=cfg.model.dropout,
     )
 
 
@@ -38,26 +39,27 @@ class DualBranchAE(nn.Module):
         decoder, 
         in_size, 
         n_classes=5, 
-        thresholds='learned', 
+        thresholds='learned',
+        dropout=False,
+        dropout_rate=0.2,
         recon_channel=288
     ):
         super().__init__()
         
         if encoder == 'dual':
-            self.encoder = DualLinkEncoder(in_size)
+            self.encoder = DualLinkEncoder(in_size, dropout, dropout_rate)
 
         elif encoder == 'single':
-            self.encoder = SingleLinkEncoder(in_size)
+            self.encoder = SingleLinkEncoder(in_size, dropout, dropout_rate)
 
         elif encoder == 'zero':
-            self.encoder = ZeroLinkEncoder(in_size)
+            self.encoder = ZeroLinkEncoder(in_size, dropout, dropout_rate)
 
         if decoder == 'reconstruction':
-            self.decoder = ReconstructionDecoder(out_channel=recon_channel)
+            self.decoder = ReconstructionDecoder(out_channel=recon_channel, dropout=dropout, dropout_rate=dropout_rate)
 
         elif decoder == 'segmentation':
             self.decoder = SegmentationDecoder(n_classes=n_classes, thresholds=thresholds)
-            #self.decoder_recon = ReconstructionDecoder()
     
     
     @torch.no_grad()
