@@ -66,10 +66,12 @@ def main(
         results=results, 
         subject_id=cfg.data.subject, 
         labelset=cfg.data.labelset,
-        uncertainty_measure=cfg.uncertainty_measure, 
+        uncertainty_measure=cfg.uncertainty_measure,
+        guidance=cfg.guidance,
         background_bias=cfg.background_bias, 
         feature=cfg.feature, 
-        save_dir=f'{cfg.out_dir}/{cfg.save_dir}'
+        save_dir=f'{cfg.out_dir}/{cfg.save_dir}',
+        postfix=cfg.postfix,
     )
 
     if verbose:

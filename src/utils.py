@@ -42,9 +42,11 @@ def save_results(
     subject_id: str,
     labelset: str,
     uncertainty_measure: str,
+    guidance: str,
     background_bias: bool,
     feature: bool,
-    save_dir: str
+    save_dir: str,
+    postfix: str = ''
 ):
     # Initialize an empty list to store the structured data
     data = []
@@ -67,13 +69,14 @@ def save_results(
                 'labelset': labelset,  # set1 or set2
                 'uncertainty_measure': uncertainty_measure, 
                 'background_bias': background_bias,
+                'guidance': guidance,  # 'uniform', 'log' or 'topk'
                 'feature': feature,
                 'bb_flipped_fg_frac': bb_flipped_fg_frac
             })
 
     # Convert the structured data into a pandas DataFrame
     df = pd.DataFrame(data)
-    save_name = f"{subject_id}_{labelset}_{uncertainty_measure}_bb-{background_bias}_{feature}.csv"
+    save_name = f"{subject_id}_{labelset}_{uncertainty_measure}_bb-{background_bias}_{feature}_{guidance}{postfix}.csv"
     df.to_csv(f'{save_dir}/{save_name}', index=False)
 
 
@@ -879,7 +882,7 @@ def simulate_user_interaction(
     )
 
     # add background bias
-    bb_flipped_voxels = 0
+    bb_flipped_fg_frac = 0
     if cfg.background_bias:
         background_class = torch.zeros(len(cfg.data.labels[cfg.data.labelset]))
         background_class[0] = 1
@@ -892,7 +895,7 @@ def simulate_user_interaction(
             threshold=t
         )
         # calculate number of changed voxels due to background bias
-        bb_flipped_fg_frac = (bb_flipped_voxels != prediction).any(0).sum() / foreground_size
+        bb_flipped_fg_frac = (bb_flipped_voxels != prediction).any(0).sum().item() / foreground_size
         # calculate scores based on updated prediction
         scores = get_scores(
             pred=prediction.flatten(1),
@@ -918,10 +921,9 @@ def simulate_user_interaction(
     # print(results[0]['num_annotated_voxels'])
 
     # cyclic process of user interaction
-    uncertainty_measure = cfg.uncertainty_measure[0]
+    uncertainty_measure = uncertainty_measures[0]
     assert uncertainty_measure != 'feature-distance', "Wrong order in uncertainty measures"
     for i in tqdm(range(cfg.num_interactions), desc='User interaction', unit='iteration'):
-
 
         u_annots, _ = dataset.user.refinement_annotation(
             prediction=prediction,
@@ -942,7 +944,7 @@ def simulate_user_interaction(
         )
 
         # add background bias
-        bb_flipped_voxels = 0
+        bb_flipped_fg_frac = 0
         if cfg.background_bias:
             background_class = torch.zeros(len(cfg.data.labels[cfg.data.labelset]))
             background_class[0] = 1
