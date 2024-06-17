@@ -611,7 +611,7 @@ class UserModel:
         pos_weight: float = 1, 
         seed: int = 42
     ) -> Tensor:
-        """ Finds the slice with the highest uncertainty across all three axis and 
+        """ Finds a random slice (with at least one voxel that is inside the brain and not yet annotated) and 
             annotates parts of it. The annotation happens in multiple steps:
             (1) mask all voxels that are already annotated with annotation_mask
             (2) Sample n_samples many seeding points and save their position in
@@ -689,6 +689,7 @@ class UserModel:
             interaction_map = torch.zeros_like(self.gt, dtype=torch.int64)
             for c in range(n_classes):
                 slice_sums = self._sum_l1_per_slice(random_mask)
+                # pick random axis
                 random_axis = np.random.randint(0,3)
                 match random_axis:
                     case 0:
@@ -698,6 +699,7 @@ class UserModel:
                     case 2:
                         slice_sums = slice_sums[2]
                 
+                # pick random slice with at least one voxel that is inside the brain and not yet annotated
                 valid_slice_indices = torch.argwhere(slice_sums > 0).flatten()    # NOTE: oder größer gleich n_samples?
                 random_slice_index = np.random.choice(valid_slice_indices)
 

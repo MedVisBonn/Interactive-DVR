@@ -924,16 +924,25 @@ def simulate_user_interaction(
     uncertainty_measure = uncertainty_measures[0]
     assert uncertainty_measure != 'feature-distance', "Wrong order in uncertainty measures"
     for i in tqdm(range(cfg.num_interactions), desc='User interaction', unit='iteration'):
-
-        u_annots, _ = dataset.user.refinement_annotation(
-            prediction=prediction,
-            annotation_mask=dataset.annotations.detach().cpu(),
-            uncertainty_map=uncertainty_per_class_maps[uncertainty_measure] if uncertainty_measure != 'ground-truth' else None,
-            n_samples=200,
-            mode='per_class',
-            seed=42,
-            inverse_class_freq=False
-        )
+        if uncertainty_measure == 'random':
+            u_annots = dataset.user.random_refinement_annotation(
+                prediction=prediction,
+                annotation_mask=dataset.annotations.detach().cpu(),
+                brain_mask=dataset.brain_mask.detach().cpu(),
+                n_samples=200,
+                mode='per_class',
+                seed=42
+            )
+        else:
+            u_annots, _ = dataset.user.refinement_annotation(
+                prediction=prediction,
+                annotation_mask=dataset.annotations.detach().cpu(),
+                uncertainty_map=uncertainty_per_class_maps[uncertainty_measure] if uncertainty_measure != 'ground-truth' else None,
+                n_samples=200,
+                mode='per_class',
+                seed=42,
+                inverse_class_freq=False
+            )
         dataset.update_annotation(u_annots)
         
         scores, prediction, uncertainty_maps, uncertainty_per_class_maps, t = evaluate_RF(
