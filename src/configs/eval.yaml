@@ -14,13 +14,24 @@ data:
   data_dir: '../../../../../data/hcp'
   subject: 599469 #784565 
   axis: coronal
-  labels: [
+  labelset: 'set1'
+  labels: 
+    set1: [
         "Other", 
         "CG", # cingulum
         "CST", 
         "FX", 
         "CC"  # corpus callosum
-    ]
+      ]
+    set2: [
+        "Other", 
+        "IFO_left", 
+        "IFO_right", 
+        "ILF_left",
+        "ILF_right", 
+        "SLF_left", 
+        "SLF_right"
+      ]
   # labels: [
   #       "Other", 
   #       "IFO_left", 

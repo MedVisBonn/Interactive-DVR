@@ -145,7 +145,7 @@ class EvalDataset(Dataset):
         super().__init__()
         self.cfg          = OmegaConf.to_container(cfg)
         self.axis         = cfg.data.axis
-        self.labels       = cfg.data.labels
+        self.labels       = cfg.data.labels[cfg.data.labelset]
         self.device       = cfg.rank
         self.modality     = modality
         self.mode         = mode

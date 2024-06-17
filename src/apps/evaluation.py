@@ -65,6 +65,7 @@ def main(
     save_results(
         results=results, 
         subject_id=cfg.data.subject, 
+        labelset=cfg.data.labelset,
         uncertainty_measure=cfg.uncertainty_measure, 
         background_bias=cfg.background_bias, 
         feature=cfg.feature, 

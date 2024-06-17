@@ -40,6 +40,7 @@ def debugging(message):
 def save_results(
     results: List[Dict],
     subject_id: str,
+    labelset: str,
     uncertainty_measure: str,
     background_bias: bool,
     feature: bool,
@@ -50,7 +51,9 @@ def save_results(
 
     # Iterate through the list to process each result
     for iteration, result in enumerate(results):
+        # Extract scores and other info that made it into results
         scores = result['scores']
+        bb_flipped_fg_frac = result['bb_flipped_fg_frac']
         for key, value in scores.items():
             parts = key.split('_')
             region = parts[0]
@@ -61,14 +64,16 @@ def save_results(
                 'score_type': score_type.replace('_tracts', ''),
                 'score': value.item(),  # Convert numpy array to Python scalar
                 'subject_id': subject_id,
+                'labelset': labelset,  # set1 or set2
                 'uncertainty_measure': uncertainty_measure, 
                 'background_bias': background_bias,
-                'feature': feature                        
+                'feature': feature,
+                'bb_flipped_fg_frac': bb_flipped_fg_frac
             })
 
     # Convert the structured data into a pandas DataFrame
     df = pd.DataFrame(data)
-    save_name = f"{subject_id}_{uncertainty_measure}_bb-{background_bias}_{feature}.csv"
+    save_name = f"{subject_id}_{labelset}_{uncertainty_measure}_bb-{background_bias}_{feature}.csv"
     df.to_csv(f'{save_dir}/{save_name}', index=False)
 
 
@@ -519,7 +524,7 @@ def get_scores(
     recall    = (TP + eps) / (TPplusFN + eps)
     f1        = (2 * precision * recall + eps) / ( precision + recall  + eps)
     
-    labels = cfg['data']["labels"]
+    labels = cfg.data.labels[cfg.data.labelset]
     scores = {}
     for c in range(len(labels)):
         scores[f"{labels[c]}_precision"] = precision[c].numpy()
@@ -587,7 +592,7 @@ def evaluate_RF(
     # predict labels in test mask
     predicted_prob    = clf.predict_proba(X_test)
     Y_predicted_prob  = torch.tensor(np.array([p[:, 1] for p in predicted_prob])).T
-    n_classes = len(cfg['data']['labels'])
+    n_classes = len(cfg.data.labels[cfg.data.labelset])
     if cfg.feature=='tta':
         Y_predicted_prob = Y_predicted_prob.reshape((num_tta, Y_test.shape[0], n_classes)).mean(axis=0)
     Y_predicted_label = (Y_predicted_prob > 0.5)*1
@@ -639,7 +644,7 @@ def evaluate_RF(
 
     #TODO: for measure in novelty_scores:
 
-    labels = cfg['data']["labels"]
+    labels = cfg.data.labels[cfg.data.labelset]
     scores = {}
     for c in range(len(labels)):
         scores[f"{labels[c]}_precision"] = precision[c].numpy()
@@ -874,16 +879,21 @@ def simulate_user_interaction(
     )
 
     # add background bias
+    bb_flipped_voxels = 0
     if cfg.background_bias:
-        background_class = torch.zeros(len(cfg.data.labels))
+        background_class = torch.zeros(len(cfg.data.labels[cfg.data.labelset]))
         background_class[0] = 1
+        bb_flipped_voxels = prediction.clone()
+        foreground_size = prediction[1:].any(0).sum().item()
         prediction = add_background_bias(
             prediction=prediction,
             anomaly_score_map=uncertainty_maps['feature-distance'],
             background_class=background_class,
             threshold=t
         )
-
+        # calculate number of changed voxels due to background bias
+        bb_flipped_fg_frac = (bb_flipped_voxels != prediction).any(0).sum() / foreground_size
+        # calculate scores based on updated prediction
         scores = get_scores(
             pred=prediction.flatten(1),
             gt=dataset.label.detach().cpu().flatten(1),
@@ -894,6 +904,7 @@ def simulate_user_interaction(
     results.append(
         {
             'scores': scores,
+            'bb_flipped_fg_frac': bb_flipped_fg_frac,
             # 'prediction': prediction.clone(),
             # 'uncertainty_maps': uncertainty_maps,
             # 'uncertainty_per_class_maps': uncertainty_per_class_maps,
@@ -931,15 +942,21 @@ def simulate_user_interaction(
         )
 
         # add background bias
+        bb_flipped_voxels = 0
         if cfg.background_bias:
-            background_class = torch.zeros(len(cfg.data.labels))
+            background_class = torch.zeros(len(cfg.data.labels[cfg.data.labelset]))
             background_class[0] = 1
+            bb_flipped_voxels = prediction.clone()
+            foreground_size = prediction[1:].any(0).sum().item()
             prediction = add_background_bias(
                 prediction=prediction,
                 anomaly_score_map=uncertainty_maps['feature-distance'],
                 background_class=background_class,
                 threshold=t
             )
+            # calculate number of changed voxels due to background bias
+            bb_flipped_fg_frac = (bb_flipped_voxels != prediction).any(0).sum().item() / foreground_size
+            # calculate scores based on updated prediction
             scores = get_scores(
                 pred=prediction.flatten(1),
                 gt=dataset.label.detach().cpu().flatten(1),
@@ -949,6 +966,7 @@ def simulate_user_interaction(
         results.append(
             {
                 'scores': scores,
+                'bb_flipped_fg_frac': bb_flipped_fg_frac,
                 # 'prediction': prediction.clone(),
                 # 'uncertainty_maps': uncertainty_maps,
                 # 'uncertainty_per_class_maps': uncertainty_per_class_maps,
