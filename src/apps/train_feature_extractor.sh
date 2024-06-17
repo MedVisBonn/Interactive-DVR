@@ -9,9 +9,10 @@ TRAIN=true
 
 # Model
 ENCODER='zero'
-DROPOUT=false
+DROPOUT=true
 N_EPOCHS=20
 PATIENCE=2
+
 
 # ++subjects="$SUBJECTS" \
 if [ "$TRAIN" = true ]; then
