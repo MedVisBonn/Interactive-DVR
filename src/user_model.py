@@ -39,8 +39,6 @@ class UserModel:
         else:
             raise ValueError('Invalid voxel selection method. Choose between "mean" and "max".')
         
-        
-        
         # statistics to track
         self.annotated_pixels = None
         self.annotated_slices = None
@@ -58,7 +56,7 @@ class UserModel:
             shape L x W x H with L = W = H  
 
         Returns
-        -------
+        ----------
         out : Tensor
             (N, n) shaped array holding slice sums, where N is
             the dimensionality (3) and n the number of slices in each
@@ -74,7 +72,7 @@ class UserModel:
         sums    = torch.zeros((dims, volume.shape[0]))
 
         # for each direction, sum values in each slice
-        for dim in range(dims):
+        for dim in range(dims): 
             axis       = tuple(indices[indices != dim])
             slice_sums = volume.sum(axis=axis)
             sums[dim]  = slice_sums
@@ -294,7 +292,8 @@ class UserModel:
         index_list = list(sampler(weights.flatten(), num_samples=num_samples, replacement=False))
         index_coords = np.unravel_index(index_list, weights.shape)
 
-        samples[:, index_coords] = ground_truth_slice[:, index_coords]
+        for l in range(len(samples)):
+            samples[l][index_coords] = ground_truth_slice[l][index_coords]
 
         return samples # has to have shape [5, 145, 145]
 
@@ -318,6 +317,7 @@ class UserModel:
             mask with added neighbors from brushing,
             shape n_classes x W x H
         """
+
         interaction_mask           = torch.zeros_like(class_samples, dtype=torch.int64)
         vectorized_binary_erosion  = np.vectorize(binary_erosion,  signature='(j,i),(k,k)->(j,i)')
         vectorized_binary_dilation = np.vectorize(binary_dilation, signature='(j,i),(k,k)->(j,i)')
@@ -528,6 +528,7 @@ class UserModel:
             random_selection = np.random.randint(0,6)
             ax  = axis[0]
             slc = indices[0]
+
             data_location = (ax, slc)
             selection = [slice(None)] + [slice(None)] * 3
             selection[ax + 1] = slc
@@ -555,6 +556,7 @@ class UserModel:
             # 2.4) create interaction map to return
             interaction_map = torch.zeros_like(self.gt, dtype=torch.int64)
             interaction_map[selection] = torch.bitwise_or(interaction_map[selection], brushed_mask)
+            
             # interaction_map[selection] = ((interaction_map[selection].sum(0) * t_selection) > 0) * 1
                 
         elif mode == 'per_class':
@@ -574,7 +576,7 @@ class UserModel:
                 random_selection = np.random.randint(0,6)
                 ax  = axis[0]
                 slc = indices[0]
-                
+                print(ax, slc)                
                 selection = [slice(None)] + [slice(None)] * 3
                 selection[ax + 1] = slc
 
@@ -598,6 +600,9 @@ class UserModel:
                 interaction_map[selection] = torch.bitwise_or(interaction_map[selection], brushed_mask)
                 data_location.append((axis[0], indices[0]))
                 
+                # update diff to reduce overdraw. We mask values that got recently annotated
+                diff *= (1-interaction_map) 
+
         return interaction_map.float(), selection
 
     
@@ -642,14 +647,14 @@ class UserModel:
         n_classes = prediction.shape[0]
 
         # calculate inverse class frequencies
-        inverse_size_weights = self.gt.mean((1,2,3)).sum() / self.gt.mean((1,2,3)).reshape((n_classes,1,1,1))
+        # inverse_size_weights = self.gt.mean((1,2,3)).sum() / self.gt.mean((1,2,3)).reshape((n_classes,1,1,1))
 
         # calculate mask for available voxels
-        available_voxels = 1 - torch.any(annotation_mask, dim=0, keepdim=True) * 1
+        # available_voxels = 1 - torch.any(annotation_mask, dim=0, keepdim=True) * 1
     	
         annotated_voxels = torch.any(annotation_mask, axis=0)
         brain_not_annoated_mask = brain_mask & ~annotated_voxels
-        x = torch.zeros((5,145,145,145))
+        x = torch.zeros_like(prediction)
         x[:, brain_not_annoated_mask] = 1     # 5, 145, 145, 145
         random_mask = torch.zeros((145,145,145))
         random_mask[brain_not_annoated_mask] = 1   # 145, 145, 145
@@ -670,7 +675,6 @@ class UserModel:
 
             ax = random_axis
             slc = random_slice_index
-            #print(ax, slc)
             data_location = (ax, slc)
             selection = [slice(None)] + [slice(None)] * 3
             selection[ax + 1] = slc
@@ -705,7 +709,7 @@ class UserModel:
 
                 ax = random_axis
                 slc = random_slice_index
-
+                print(ax, slc) 
                 selection = [slice(None)] + [slice(None)] * 3
                 selection[ax + 1] = slc
                 random_selection = x[selection]
