@@ -19,7 +19,7 @@ def get_eval_dataset(
     verbose: bool = False
 ):  
     if verbose:
-        print(f"Loading dataset for subject {cfg.data.subject} ...")
+        print(f"Loading dataset for subject {cfg.data.subject} with labels {cfg.data.labelset} ...")
     dataset = EvalDataset(
         subject_id=cfg.data.subject, 
         cfg=cfg,
