@@ -62,6 +62,8 @@ def main(
     )
 
     # save results
+    # for r in results:
+    #     print(r['scores']['Avg_f1_tracts']) 
     save_results(
         results=results, 
         subject_id=cfg.data.subject, 
