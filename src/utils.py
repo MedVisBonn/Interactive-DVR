@@ -50,16 +50,23 @@ def save_results(
 ):
     # Initialize an empty list to store the structured data
     data = []
-
+    
     # Iterate through the list to process each result
     for iteration, result in enumerate(results):
         # Extract scores and other info that made it into results
         scores = result['scores']
         bb_flipped_fg_frac = result['bb_flipped_fg_frac']
         for key, value in scores.items():
+            key = key.replace('_tracts', '')
             parts = key.split('_')
-            region = parts[0]
-            score_type = parts[1] if len(parts) == 2 else parts[1] + "_" + parts[2] # Handle the _tracts case
+            if len(parts) == 2:
+                region = parts[0]
+                score_type = parts[1]
+            elif len(parts) == 3:
+                region = parts[0] + "_" + parts[1]
+                score_type = parts[2]
+            # region = parts[0]
+            # score_type = parts[1] if len(parts) == 2 else parts[1] + "_" + parts[2] # Handle the _tracts case
             data.append({
                 'iteration': iteration,
                 'region': region,
@@ -651,7 +658,7 @@ def evaluate_RF(
             case 'ground-truth':
                 continue
             case 'random':
-                break
+                continue
             case 'entropy':
                 uncertainty_map, uncertainty_per_class = uncertainty_entropy(Y_predicted_prob, n_classes, test_mask)
             case 'spatial-distance':
@@ -935,12 +942,13 @@ def simulate_user_interaction(
         }
     )
 
-    # print(results[0]['scores'])
+    print(results[0]['scores'])
     # print(results[0]['num_annotations'])
     # print(results[0]['num_annotated_voxels'])
 
     # cyclic process of user interaction
     uncertainty_measure = uncertainty_measures[0]
+    print(f'Evluating uncertainty measure: {uncertainty_measure}')
     assert uncertainty_measure != 'feature-distance', "Wrong order in uncertainty measures"
     for i in tqdm(range(cfg.num_interactions), desc='User interaction', unit='iteration'):
         if uncertainty_measure == 'random':
@@ -948,7 +956,7 @@ def simulate_user_interaction(
                 prediction=prediction,
                 annotation_mask=dataset.annotations.detach().cpu(),
                 brain_mask=dataset.brain_mask.detach().cpu(),
-                n_samples=200,
+                n_samples=cfg.init_voxels,
                 mode='per_class',
                 seed=42
             )
@@ -957,11 +965,13 @@ def simulate_user_interaction(
                 prediction=prediction,
                 annotation_mask=dataset.annotations.detach().cpu(),
                 uncertainty_map=uncertainty_per_class_maps[uncertainty_measure] if uncertainty_measure != 'ground-truth' else None,
-                n_samples=200,
+                n_samples=cfg.init_voxels,
                 mode='per_class',
                 seed=42,
                 inverse_class_freq=False
             )
+
+        print(f'Number of annotated voxels per class: {u_annots.sum((1,2,3))}')
         dataset.update_annotation(u_annots)
         
         scores, prediction, uncertainty_maps, uncertainty_per_class_maps, t = evaluate_RF(
