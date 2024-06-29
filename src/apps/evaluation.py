@@ -61,20 +61,23 @@ def main(
         verbose=verbose
     )
 
+    import torch
+    torch.save(results, f'{cfg.out_dir}/{cfg.save_dir}/results_baseline_{cfg.data.labelset}.pt')
+
     # save results
     # for r in results:
-    #     print(r['scores']['Avg_f1_tracts']) 
-    save_results(
-        results=results, 
-        subject_id=cfg.data.subject, 
-        labelset=cfg.data.labelset,
-        uncertainty_measure=cfg.uncertainty_measure,
-        guidance=cfg.guidance,
-        background_bias=cfg.background_bias, 
-        feature=cfg.feature, 
-        save_dir=f'{cfg.out_dir}/{cfg.save_dir}',
-        postfix=cfg.postfix,
-    )
+    #     print(r['scores']) 
+    # save_results(
+    #     results=results, 
+    #     subject_id=cfg.data.subject, 
+    #     labelset=cfg.data.labelset,
+    #     uncertainty_measure=cfg.uncertainty_measure,
+    #     guidance=cfg.guidance,
+    #     background_bias=cfg.background_bias, 
+    #     feature=cfg.feature, 
+    #     save_dir=f'{cfg.out_dir}/{cfg.save_dir}',
+    #     postfix=cfg.postfix,
+    # )
 
     if verbose:
         print(f"Total time: {(time() - start) / 60:.2f} min")

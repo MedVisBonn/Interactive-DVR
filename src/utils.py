@@ -649,8 +649,18 @@ def evaluate_RF(
     recall    = (TP + eps) / (TPplusFN + eps)
     f1        = (2 * precision * recall + eps) / ( precision + recall  + eps)
 
-    uncertainty_maps = {}
-    uncertainty_per_class_maps = {}
+    uncertainty_maps = {
+        'ground-truth': None,
+        'random': None,
+        'entropy': None,
+        'feature-distance': None,
+    }
+    uncertainty_per_class_maps = {
+        'ground-truth': None,
+        'random': None,
+        'entropy': None,
+        'feature-distance': None,
+    }
 
     for measure in uncertainty_measures:
         t = None
@@ -930,10 +940,13 @@ def simulate_user_interaction(
         )
 
 
+
     results.append(
         {
             'scores': scores,
             'bb_flipped_fg_frac': bb_flipped_fg_frac,
+            'annotated_voxels_total': dataset.annotations.detach().cpu().sum(),
+            'annotated_voxels_per-class': dataset.annotations.detach().cpu().sum((1,2,3))
             # 'prediction': prediction.clone(),
             # 'uncertainty_maps': uncertainty_maps,
             # 'uncertainty_per_class_maps': uncertainty_per_class_maps,
@@ -942,12 +955,25 @@ def simulate_user_interaction(
         }
     )
 
-    print(results[0]['scores'])
+    # print(results[0]['scores'])
     # print(results[0]['num_annotations'])
     # print(results[0]['num_annotated_voxels'])
 
     # cyclic process of user interaction
     uncertainty_measure = uncertainty_measures[0]
+
+
+
+    ### get number of samples per class
+    class_errors = torch.ne(prediction, dataset.label.detach().cpu()).sum((1,2,3))
+    class_error_rate = class_errors / class_errors.sum()
+    n_total = cfg.init_voxels * len(cfg.data.labels[cfg.data.labelset])
+    n_samples = (class_error_rate * n_total).round().int()
+
+    print(n_samples, class_errors, n_total, class_error_rate)
+    ###
+    
+    
     print(f'Evluating uncertainty measure: {uncertainty_measure}')
     assert uncertainty_measure != 'feature-distance', "Wrong order in uncertainty measures"
     for i in tqdm(range(cfg.num_interactions), desc='User interaction', unit='iteration'):
@@ -961,11 +987,22 @@ def simulate_user_interaction(
                 seed=42
             )
         else:
+            # ## get number of samples per class
+            class_errors = torch.ne(prediction, dataset.label.detach().cpu()).sum((1,2,3))
+            class_error_rate = class_errors[1:] / class_errors[1:].sum()
+            n_total = cfg.init_voxels * (len(cfg.data.labels[cfg.data.labelset]))
+            n_samples = torch.zeros(len(cfg.data.labels[cfg.data.labelset]))
+            # n_samples[1:] = (class_error_rate * n_total).round().int()
+            n_samples[1:] = n_total // (n_samples.shape[0]-1)
+            n_samples[0] = 0
+            # print(n_samples, class_errors, n_total, class_error_rate)
+            # ##
+
             u_annots, _ = dataset.user.refinement_annotation(
                 prediction=prediction,
                 annotation_mask=dataset.annotations.detach().cpu(),
-                uncertainty_map=uncertainty_per_class_maps[uncertainty_measure] if uncertainty_measure != 'ground-truth' else None,
-                n_samples=cfg.init_voxels,
+                uncertainty_map=uncertainty_per_class_maps[uncertainty_measure],
+                n_samples=n_samples,
                 mode='per_class',
                 seed=42,
                 inverse_class_freq=False
@@ -973,7 +1010,8 @@ def simulate_user_interaction(
 
         print(f'Number of annotated voxels per class: {u_annots.sum((1,2,3))}')
         dataset.update_annotation(u_annots)
-        
+        print(f'Number of annotated voxels: {dataset.annotations.detach().cpu().sum()}')
+
         scores, prediction, uncertainty_maps, uncertainty_per_class_maps, t = evaluate_RF(
             dataset=dataset, 
             features=features, 
@@ -1007,6 +1045,8 @@ def simulate_user_interaction(
             {
                 'scores': scores,
                 'bb_flipped_fg_frac': bb_flipped_fg_frac,
+                'annotated_voxels_total': dataset.annotations.detach().cpu().sum(),
+                'annotated_voxels_per-class': dataset.annotations.detach().cpu().sum((1,2,3)),
                 # 'prediction': prediction.clone(),
                 # 'uncertainty_maps': uncertainty_maps,
                 # 'uncertainty_per_class_maps': uncertainty_per_class_maps,
@@ -1015,6 +1055,8 @@ def simulate_user_interaction(
             }
         )
 
-    return results
+    # TODO:
+    # return results
+    return prediction
     # for r in results:
     #     print(r['scores']['Avg_f1_tracts']) 

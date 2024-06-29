@@ -1,7 +1,8 @@
-from typing import Iterable, Dict, Callable, Tuple, Union
+from typing import Iterable, Dict, Callable, Tuple, Union, List
 import numpy as np
 import torch
 from torch import Tensor
+from torch.utils.data import WeightedRandomSampler
 from scipy.ndimage.morphology import binary_erosion, binary_dilation
 import random
 
@@ -12,6 +13,7 @@ class UserModel:
         self, 
         ground_truth: Tensor, 
         guidance: str,
+        soft_scores: bool,
         cfg: dict, 
         # brush_sizes=torch.arange(2,7)
     ):
@@ -20,6 +22,8 @@ class UserModel:
         # globals
         self.gt = ground_truth.float() # nd array or float tensor?
         self.guidance = guidance
+        self.soft_scores = soft_scores
+        self.uncertainty_measure = cfg['uncertainty_measure']
         # if 'brush' in cfg.keys():
         self.brush_sizes = cfg['brush_sizes']
         # else:
@@ -46,7 +50,9 @@ class UserModel:
 
     def _sum_l1_per_slice(
         self, 
-        volume: Tensor
+        volume: Tensor,
+        n_samples: int,
+        random_axis: bool = False,
     ) -> Tensor:
         """ Find sum over all slices in each direction
 
@@ -71,11 +77,26 @@ class UserModel:
         indices = torch.arange(dims)
         sums    = torch.zeros((dims, volume.shape[0]))
 
-        # for each direction, sum values in each slice
-        for dim in range(dims): 
+        # valid_voxels = torch.zeros_like(volume)
+        # valid_voxels[self.gt ] = 1
+
+        ### TODO
+        if random_axis:
+            dim        = random.randint(0,2)
             axis       = tuple(indices[indices != dim])
             slice_sums = volume.sum(axis=axis)
             sums[dim]  = slice_sums
+        else:
+        # for each direction, sum values in each slice
+            for dim in range(dims): 
+                axis       = tuple(indices[indices != dim])
+                slice_sums = volume.sum(axis=axis)
+                valid_sums = self.gt.any(0).sum(axis=axis)
+                slice_sums[valid_sums < 5] = 0
+                sums[dim]  = slice_sums
+
+        ###
+
         return sums
         
         
@@ -100,8 +121,6 @@ class UserModel:
             slice index of slices in descending order
             w.r.t. their slice sum
         """
-
-        length = slice_sums.shape[0]
 
         # calculate direction (axis) and indices of slices in 
         # descending order w.r.t. their slice sum
@@ -146,19 +165,25 @@ class UserModel:
         # misclassifications by class frequency for each class
         # and then normalize to stochastic vector
         total                  = slc_abs.sum(dim=(1,2))
+        # print(total, inverse_frequencies)
         proportions            = total * inverse_frequencies.flatten()
         proportions_normalized = proportions / proportions.sum()
-        # print("freq", inverse_frequencies)
-
+        # print(n, proportions_normalized)
         # quantize sample proportions to get preliminary number
         # of samples
         n_samples = (proportions_normalized * n).type(torch.int)
-
+        # print(n_samples)
         # catch cases where int conversion results in a number of
         # samples that is different from n and correct them.
         # Current strategy: minimal impact by removing and adding
         # to dominant class
         while ( n_samples.sum() != n ):
+            #TODO
+            # print(n_samples)
+
+            # if n_samples.min() < -1:
+            #     print("n_samples.min() < -1")
+            #     break
             # in case of undershoot, add samples to class
             # with highest number of overall samples
             if n_samples.sum() < n:
@@ -174,7 +199,8 @@ class UserModel:
 
 
     def _sample_candidate_voxels(
-        self, slc: Tensor, 
+        self, 
+        slc: Tensor, 
         ground_truth_slice: Tensor, 
         n_class_samples: Tensor, 
         seed=None
@@ -210,18 +236,22 @@ class UserModel:
 
         # init sampler and output tensor
         sampler = torch.utils.data.WeightedRandomSampler
-        samples = torch.zeros_like(slc)
+        samples = torch.zeros_like(ground_truth_slice)
 
         #weights = torch.any(torch.abs(slc).type(torch.uint8), axis=0) * ground_truth_slice # 5 x 145 x 145 , alte Version
-        weights = torch.abs(slc).max(dim=0).values * ground_truth_slice # 5 x 145 x 145 , neue Version
+        
 
+        
+        # weights = torch.abs(slc).max(dim=0).values * ground_truth_slice # 5 x 145 x 145 , neue Version
+        weights = slc
+        # print(weights.shape)
         # print(weights.shape, (weights>0).sum(axis=(1,2)))
-        if self.guidance == 'uniform':
-            pass
-        elif self.guidance == 'log':
-            weights = weights ** 2
-        else:
-            raise ValueError('Invalid guidance. Choose between "uniform" and "log".')
+        # if self.guidance == 'uniform':
+        #     pass
+        # elif self.guidance == 'log':
+        #     weights = weights ** 2
+        # else:
+        #     raise ValueError('Invalid guidance. Choose between "uniform" and "log".')
 
         weights = weights / (weights>0).sum(axis=(1,2)).reshape(-1,1,1)
         # iterate over classes, sampling for each independently
@@ -233,8 +263,8 @@ class UserModel:
             # generate uniform weights for false negative voxels
             # weight = (volume > 0) / (volume > 0).sum()
             # upper bound for number of samples to maximum in slice
-            max_samples = (weight > 0).sum()
-            num_samples = int(min(max_samples, num_samples))
+            # max_samples = (weight > 0).sum()
+            # num_samples = int(min(max_samples, num_samples))
             # catch case where number of samples is zero for a class
             if num_samples > 0:
                 # 1D coordinates for samples from weight matrix
@@ -244,6 +274,8 @@ class UserModel:
                 if self.guidance == 'top_k':
                     index_list = list(weight.flatten().sort(descending=True).indices[:num_samples])
                 else:
+                    num_samples = int(num_samples.data)
+                    # this thing is buggy af
                     index_list = list(sampler(weight.flatten(), num_samples=num_samples, replacement=False))
                     
                 # index_list = list(sampler(weight.flatten(), num_samples=num_samples, replacement=False))
@@ -395,7 +427,7 @@ class UserModel:
             t_norm = torch.norm(self.gt * inverse_size_weights, p=1, dim=0)
 
             # 1.1) calc sum over l1 norms, e.g. for the l1 norms for segmentation predictions
-            slice_sums = self._sum_l1_per_slice(t_norm)
+            slice_sums = self._sum_l1_per_slice(t_norm, n_samples=n_samples)
 
             # 1.2) order slices in descending order by their sum
             axis, indices = self._order_slices_by_sum(slice_sums)
@@ -432,7 +464,7 @@ class UserModel:
             for c in range(n_classes):
                 cweight = torch.eye(n_classes)[c].view(n_classes, 1, 1, 1)
                 t_norm = torch.norm(self.gt * cweight, p=1, dim=0)
-                slice_sums = self._sum_l1_per_slice(t_norm)
+                slice_sums = self._sum_l1_per_slice(t_norm, n_samples=n_samples, random_axis=False)
                 axis, indices = self._order_slices_by_sum(slice_sums)
                 
                 selection = [slice(None)] * 4
@@ -442,7 +474,17 @@ class UserModel:
                 
                 slice_sample_weights = inverse_size_weights * cweight * n_classes / (n_classes+1) * pos_weight + \
                                     inverse_size_weights * (1-cweight) / ( (n_classes+1) * (n_classes-1) )
-                
+
+
+
+                # #TODO
+                # if c == 0:
+                #     n_samples = 900
+                # else:
+                #     n_samples = 100
+                # ### 
+
+
                 n_class_samples = self._slice_samples_per_class(t_selection, slice_sample_weights, n_samples)
                 #print(n_class_samples, n_samples)
                 class_samples = self._sample_candidate_voxels(t_selection, t_selection, n_class_samples=n_class_samples, seed=seed)
@@ -459,7 +501,7 @@ class UserModel:
         prediction: Tensor, 
         annotation_mask: Tensor, 
         uncertainty_map: Tensor,
-        n_samples: int, 
+        n_samples: Union[List[int], int], 
         mode: int = 'single_slice', 
         map_type: str = 'per_class',
         pos_weight: float = 1, 
@@ -509,17 +551,37 @@ class UserModel:
         # calculate difference between truth and prediction, i.e. misclassified voxels
         if uncertainty_map != None:
             diff = uncertainty_map * available_voxels
-        else:
+        elif self.uncertainty_measure == 'ground-truth':
             diff = torch.abs(self.gt - prediction.float()) * available_voxels
+            if self.soft_scores:
+                diff.clamp_(0.1, 0.9)
+        elif self.uncertainty_measure == 'random':
+            diff = available_voxels.repeat(n_classes, 1, 1, 1)
+        else:
+            raise ValueError('Invalid uncertainty measure. Choose between "ground-truth" and something that creates a map.')
         # print("weights:",inverse_size_weights.flatten())
-        
+
+
+        if self.guidance == 'uniform':
+            pass
+        elif self.guidance == 'top_k':
+            pass
+        elif self.guidance == 'log':
+            diff = diff ** 4
+        else:
+            raise ValueError('Invalid guidance. Choose between "uniform", "top_k" and "log".')
         
         if mode == 'single_slice':
+            # check whether n_samples is an int
+            assert isinstance(n_samples, int), 'n_samples must be an integer for single slice mode.'
+
             # norm over classes weighted by inverse class frequency - importance weight for sampling
-            diff_norm = torch.norm(diff  * inverse_size_weights, p=1, dim=0)
+            diff_weighted = diff * inverse_size_weights
+            diff_norm = diff_weighted / diff_weighted.sum(0, keepdim=True)
+            # diff_norm = torch.norm(diff  * inverse_size_weights, p=1, dim=0)
 
             # 1.1) calc sum over l1 norms, e.g. for the l1 norms for segmentation predictions
-            slice_sums = self._sum_l1_per_slice(diff_norm)
+            slice_sums = self._sum_l1_per_slice(diff_norm, n_samples=n_samples)
 
             # 1.2) order slices in descending order by their sum
             axis, indices = self._order_slices_by_sum(slice_sums)
@@ -547,7 +609,6 @@ class UserModel:
 
             # 2.2) for each class, sample from false negatives as often as specified in n_class_samples
             # print(diff_selection.shape, diff.shape, n_class_samples)
-            print(diff_selection.shape)
             class_samples = self._sample_candidate_voxels(diff_selection, t_selection, n_class_samples=n_class_samples, seed=seed)
 
             # 2.3) brush all samples with maximum brush from list of brushes
@@ -558,25 +619,49 @@ class UserModel:
             interaction_map[selection] = torch.bitwise_or(interaction_map[selection], brushed_mask)
             
             # interaction_map[selection] = ((interaction_map[selection].sum(0) * t_selection) > 0) * 1
-                
+        
         elif mode == 'per_class':
+            if isinstance(n_samples, int):
+                n_samples = [n_samples] * n_classes
             data_location = []
             interaction_map = torch.zeros_like(self.gt, dtype=torch.int64)
-            for c in range(n_classes):
+            for c, n_sample_for_class in enumerate(n_samples):
                 cweight = torch.eye(n_classes)[c].view(n_classes, 1, 1, 1)
-                diff_norm = torch.norm(diff * cweight, p=1, dim=0) # 145, 145, 145, binär
+                diff_norm = (diff * cweight).sum(0)
+                # diff_norm = torch.norm(diff * cweight, p=1, dim=0) # 145, 145, 145, binär
 
                 # 1.1) calc sum over l1 norms, e.g. for the l1 norms for segmentation predictions
-                slice_sums = self._sum_l1_per_slice(diff_norm)  # 3, 145
+                random_axis = True if self.uncertainty_measure == 'random' else False
+                slice_sums = self._sum_l1_per_slice(diff_norm, n_samples=n_sample_for_class, random_axis=random_axis)  # 3, 145
+                if self.guidance == 'top_k':
+                    # 1.2) order slices in descending order by their sum
+                    axis, indices = self._order_slices_by_sum(slice_sums)
 
-                # 1.2) order slices in descending order by their sum
-                axis, indices = self._order_slices_by_sum(slice_sums)
+                else:
+                    # double normalization because numpy is ... special. See choice issues in numpy
+                    slice_sums  = slice_sums.numpy() / slice_sums.numpy().sum()
+                    slice_sums /= slice_sums.sum()
 
+                    # sampler = torch.utils.data.WeightedRandomSampler
+                    torch.manual_seed(1)
+                    index_flat = np.random.choice(
+                        torch.arange(slice_sums.size, dtype=torch.int64),
+                        size=1,
+                        replace=False,
+                        p=slice_sums.flatten()
+                    )
+                    # index_flat = list(WeightedRandomSampler(
+                    #     slice_sums.flatten(), 
+                    #     num_samples=32, 
+                    #     replacement=False
+                    # ))
+                    axis, indices = np.unravel_index(index_flat, slice_sums.shape)
                 # 2.0) select slice with highest importance weight over all axes
-                random_selection = np.random.randint(0,6)
+                #      or the slice that got sampled. In this case the list has
+                #      length 1
                 ax  = axis[0]
                 slc = indices[0]
-                print(ax, slc)                
+
                 selection = [slice(None)] + [slice(None)] * 3
                 selection[ax + 1] = slc
 
@@ -586,15 +671,28 @@ class UserModel:
                 
                 slice_sample_weights = inverse_size_weights * cweight * n_classes / (n_classes+1) * pos_weight + \
                     inverse_size_weights * (1-cweight) / ( (n_classes+1) * (n_classes-1) )
+                    
+
+                n_class_samples = self._slice_samples_per_class(
+                    slc=t_selection, 
+                    inverse_frequencies=slice_sample_weights, 
+                    n=n_sample_for_class
+                )
                 
-                n_class_samples = self._slice_samples_per_class(t_selection, slice_sample_weights, n_samples)
-                #print(n_class_samples, n_samples)
-                
-                # 2.2) for each class, sample from false negatives as often as specified in n_class_samples
-                class_samples = self._sample_candidate_voxels(diff_selection, t_selection, n_class_samples=n_class_samples, seed=seed)
+                # 2.2) for each class, sample from errors as often as specified in n_class_samples
+                class_samples = self._sample_candidate_voxels(
+                    diff_selection, 
+                    t_selection, 
+                    n_class_samples=n_class_samples, 
+                    seed=seed
+                )
+
 
                 # 2.3) brush all samples with maximum brush from list of brushes
-                brushed_mask = self._slice_add_neighbors(class_samples, t_selection)
+                brushed_mask = self._slice_add_neighbors(
+                    class_samples=class_samples, 
+                    ground_truth_slice=t_selection
+                )
 
                 # 2.4) create interaction map to return
                 interaction_map[selection] = torch.bitwise_or(interaction_map[selection], brushed_mask)
@@ -692,7 +790,7 @@ class UserModel:
             data_location = []
             interaction_map = torch.zeros_like(self.gt, dtype=torch.int64)
             for c in range(n_classes):
-                slice_sums = self._sum_l1_per_slice(random_mask)
+                slice_sums = self._sum_l1_per_slice(random_mask, n_samples=n_samples)
                 # pick random axis
                 random_axis = np.random.randint(0,3)
                 match random_axis:

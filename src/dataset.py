@@ -189,6 +189,7 @@ class EvalDataset(Dataset):
         self.user = UserModel(
             ground_truth=self.label, 
             guidance=cfg["guidance"],
+            soft_scores=cfg["soft_scores"],
             cfg=cfg)
             
         # [classes, B, H, W]

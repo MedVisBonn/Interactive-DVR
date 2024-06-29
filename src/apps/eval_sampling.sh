@@ -18,8 +18,8 @@ done
 POSTFIX='_no-background-budget'
 CUDA_DEVICE=6
 VERBOSE=true
-SUBJECTS=('987983')
-# SUBJECTS=('987983' '709551' '677968' '792564' '782561' '770352' '729557' '705341') # '917255' '702133' '877168' '679568' '992774' '958976' '765056' '771354')
+# SUBJECTS=('987983')
+SUBJECTS=('987983' '709551' '677968' '792564' '782561' '770352' '729557' '705341') # '917255' '702133' '877168' '679568' '992774' '958976' '765056' '771354')
 LABELSETS=('set1' 'set2')
 
 # User Model
@@ -28,16 +28,10 @@ REFINEMENT_VOXELS=200
 NUM_INTERACTIONS=5
 
 # Setup
-# UNCERTAINTY_MEASURE='random'
-# if [ "$UNCERTAINTY_MEASURE" == "ground-truth" ]; then
-#   GUIDANCE='uniform'
-# else
-#   GUIDANCE='log'
-# fi
-GUIDANCE='log'
+GUIDANCES=('uniform' 'top_k')
 SOFT_SCORES=true
-BACKGROUND_BIAS=false
-FEATURE='default'
+BACKGROUND_BIAS=true
+FEATURE='tta'
 if [ "$FEATURE" == "ttd" ]; then
   DROPOUT=true
 else
@@ -45,13 +39,12 @@ else
 fi
 
 
-
 for subject in "${SUBJECTS[@]}"; do
   for labelset in "${LABELSETS[@]}"; do
-    for uncertainty in "${UNCERTAINTY_MEASURE[@]}"; do
+    for guidance in "${GUIDANCES[@]}"; do
 
       CUDA_VISIBLE_DEVICES=$CUDA_DEVICE python evaluation.py \
-              -cn eval_uncertainty \
+              -cn eval_sampling \
               ++verbose="$VERBOSE" \
               ++postfix="$POSTFIX" \
               ++data.subject="$subject" \
@@ -60,9 +53,9 @@ for subject in "${SUBJECTS[@]}"; do
               ++refinement_voxels="$REFINEMENT_VOXELS" \
               ++num_interactions=$NUM_INTERACTIONS \
               ++model.dropout=$DROPOUT \
-              ++guidance="$GUIDANCE" \
+              ++guidance="$guidance" \
               ++soft_scores="$SOFT_SCORES" \
-              ++uncertainty_measure="$uncertainty" \
+              ++uncertainty_measure="$UNCERTAINTY_MEASURE" \
               ++background_bias="$BACKGROUND_BIAS" \
               ++feature="$FEATURE"
     done

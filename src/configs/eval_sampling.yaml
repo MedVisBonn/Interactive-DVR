@@ -5,7 +5,7 @@ log: true
 rank: 0
 root_dir: '../..'
 out_dir: '../../../../out'
-save_dir: "results/data/collection"
+save_dir: "results/data/experiment3"
 postfix: ''
 wandb:
   project: 'VCBM24'
